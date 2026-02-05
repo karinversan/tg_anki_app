@@ -23,6 +23,43 @@ from app.services.rate_limit import check_rate_limit
 router = APIRouter(prefix="/topics/{topic_id}/jobs", tags=["jobs"])
 logger = logging.getLogger("api.jobs")
 
+_ACTIVE_STATUSES = {"queued", "running"}
+
+
+async def _cancel_active_jobs(
+    session: AsyncSession,
+    *,
+    topic_id: UUID,
+    user_id: int,
+    exclude_job_id: UUID | None = None,
+) -> int:
+    stmt = select(GenerationJob).where(
+        GenerationJob.topic_id == topic_id,
+        GenerationJob.user_id == user_id,
+        GenerationJob.status.in_(_ACTIVE_STATUSES),
+    )
+    if exclude_job_id:
+        stmt = stmt.where(GenerationJob.id != exclude_job_id)
+    result = await session.execute(stmt)
+    jobs = result.scalars().all()
+    if not jobs:
+        return 0
+    now = datetime.utcnow()
+    job_ids = [str(job.id) for job in jobs]
+    for job in jobs:
+        job.status = "cancelled"
+        job.stage = "done"
+        job.progress = 100
+        job.error_message = "Superseded by new generation"
+        job.finished_at = now
+    await session.commit()
+    for job_id in job_ids:
+        try:
+            celery_app.control.revoke(job_id, terminate=False)
+        except Exception:
+            logger.warning("Failed to revoke job %s", job_id, exc_info=True)
+    return len(jobs)
+
 
 @router.post("/", response_model=JobOut)
 async def create_job(
@@ -42,6 +79,8 @@ async def create_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    await _cancel_active_jobs(session, topic_id=topic_id, user_id=user.id)
 
     params = payload.model_dump()
     job = GenerationJob(
@@ -107,6 +146,10 @@ async def cancel_job(
     job.error_message = "Cancelled by user"
     job.finished_at = datetime.utcnow()
     await session.commit()
+    try:
+        celery_app.control.revoke(str(job.id), terminate=False)
+    except Exception:
+        logger.warning("Failed to revoke job %s", job.id, exc_info=True)
     return JobOut.model_validate(job)
 
 
@@ -117,6 +160,8 @@ async def retry_job(
     job: GenerationJob = Depends(get_job_for_user),
     session: AsyncSession = Depends(get_session),
 ) -> JobOut:
+    await _cancel_active_jobs(session, topic_id=topic_id, user_id=job.user_id)
+
     new_job = GenerationJob(
         topic_id=topic_id,
         user_id=job.user_id,
