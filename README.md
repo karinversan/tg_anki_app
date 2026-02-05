@@ -11,17 +11,36 @@
 
 ## Скриншоты
 
-<p>
-  <img src="imgs/screenshots/telegram-open-miniapp.png" width="220" alt="Telegram bot entry" />
-  <img src="imgs/screenshots/web-topics.png" width="220" alt="Topics list" />
-  <img src="imgs/screenshots/web-files-empty.png" width="220" alt="Empty files state" />
-</p>
-
-<p>
-  <img src="imgs/screenshots/web-files-with-pdf.png" width="220" alt="Files with PDF" />
-  <img src="imgs/screenshots/web-generation-params.png" width="220" alt="Generation params" />
-  <img src="imgs/screenshots/web-generation-progress.png" width="220" alt="Generation progress" />
-</p>
+<table>
+  <tr>
+    <td align="center">
+      <img src="imgs/screenshots/telegram-open-miniapp.png" width="220" height="440" alt="Telegram bot entry" /><br/>
+      <sub>Telegram entry</sub>
+    </td>
+    <td align="center">
+      <img src="imgs/screenshots/web-topics.png" width="220" height="440" alt="Topics list" /><br/>
+      <sub>Topics</sub>
+    </td>
+    <td align="center">
+      <img src="imgs/screenshots/web-files-empty.png" width="220" height="440" alt="Empty files state" /><br/>
+      <sub>Empty files</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="imgs/screenshots/web-files-with-pdf.png" width="220" height="440" alt="Files with PDF" /><br/>
+      <sub>Files with PDF</sub>
+    </td>
+    <td align="center">
+      <img src="imgs/screenshots/web-generation-params.png" width="220" height="440" alt="Generation params" /><br/>
+      <sub>Generation params</sub>
+    </td>
+    <td align="center">
+      <img src="imgs/screenshots/web-generation-progress.png" width="220" height="440" alt="Generation progress" /><br/>
+      <sub>Generation progress</sub>
+    </td>
+  </tr>
+</table>
 
 ## Архитектура
 
