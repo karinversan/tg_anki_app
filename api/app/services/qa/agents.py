@@ -26,10 +26,21 @@ from app.services.qa.utils import (
 logger = logging.getLogger(__name__)
 
 
-def _parse_qgen_payload(llm: Any, raw: str, file_name: str) -> list[dict[str, Any]]:
+def _cancelled(ctx: QAContext) -> bool:
+    return bool(ctx.should_cancel and ctx.should_cancel())
+
+
+def _parse_qgen_payload(
+    llm: Any,
+    raw: str,
+    file_name: str,
+    should_cancel: Any | None = None,
+) -> list[dict[str, Any]]:
     max_retries = max(0, settings.llm_json_retries)
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
+        if should_cancel and should_cancel():
+            return []
         try:
             data = safe_json_loads(raw)
             if isinstance(data, dict):
@@ -42,12 +53,48 @@ def _parse_qgen_payload(llm: Any, raw: str, file_name: str) -> list[dict[str, An
         if attempt < max_retries:
             snippet = raw[: settings.llm_json_repair_max_chars]
             repair_prompt = (
-                "Исправь ответ и верни ТОЛЬКО валидный JSON-массив объектов.\n"
-                "Никакого текста вне JSON. Если исправить нельзя, верни [].\n\n"
+                "Исправь ответ и верни ТОЛЬКО валидный JSON-объект вида {\"items\": [...]}.\n"
+                "Никакого текста вне JSON. Если исправить нельзя, верни {\"items\": []}.\n\n"
                 f"ОТВЕТ:\n{snippet}"
             )
-            raw = invoke(llm, repair_prompt)
+            raw = invoke(llm, repair_prompt, should_cancel=should_cancel)
     logger.warning("QGenAgent parse failed (%s): %s", file_name, last_exc)
+    return []
+
+
+def _parse_topic_list(
+    llm: Any,
+    raw: str,
+    file_name: str,
+    should_cancel: Any | None = None,
+) -> list[str]:
+    max_retries = max(0, settings.llm_json_retries)
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        if should_cancel and should_cancel():
+            return []
+        try:
+            data = safe_json_loads(raw)
+            if isinstance(data, dict):
+                data = data.get("items") or data.get("topics") or data.get("data")
+            if isinstance(data, list):
+                topics = [str(x).strip() for x in data if str(x).strip()]
+                if topics:
+                    return topics
+                last_exc = ValueError("Empty topics list")
+            else:
+                last_exc = ValueError(f"Unexpected JSON type: {type(data)}")
+        except Exception as exc:
+            last_exc = exc
+        if attempt < max_retries:
+            snippet = raw[: settings.llm_json_repair_max_chars]
+            repair_prompt = (
+                "Исправь ответ и верни ТОЛЬКО JSON-объект вида {\"items\": [...]}.\n"
+                "Никакого текста вне JSON. Если исправить нельзя, верни {\"items\": []}.\n\n"
+                f"ОТВЕТ:\n{snippet}"
+            )
+            raw = invoke(llm, repair_prompt, should_cancel=should_cancel)
+    logger.warning("PlannerAgent: topics parse failed (%s): %s", file_name, last_exc)
     return []
 
 
@@ -72,6 +119,8 @@ class NormalizeChunksAgent(Agent):
     def run(self, ctx: QAContext) -> QAContext:
         normalized: dict[str, list[dict[str, Any]]] = {}
         for f in ctx.files:
+            if _cancelled(ctx):
+                return ctx
             chunks = normalize_chunks(f.chunks, f.file_name)
             if chunks:
                 normalized[f.file_id] = chunks
@@ -88,6 +137,8 @@ class IndexPerFileAgent(Agent):
         base_dir = settings.chroma_path
 
         for f in ctx.files:
+            if _cancelled(ctx):
+                return ctx
             if ctx.embeddings is None:
                 break
             chunks = ctx.normalized_chunks.get(f.file_id, [])
@@ -135,6 +186,8 @@ class PlannerAgent(Agent):
 
         per_file_topics: dict[str, list[str]] = {}
         for f in ctx.files:
+            if _cancelled(ctx):
+                return ctx
             chunks = ctx.normalized_chunks.get(f.file_id, [])
             sample = "\n\n".join(ch["text"][:600] for ch in chunks[:8])
             if not sample.strip():
@@ -146,16 +199,11 @@ class PlannerAgent(Agent):
                 "Сформируй список тем по документу ниже.\n"
                 f"Нужно ровно {target} тем.\n"
                 "Темы короткие, существительные/словосочетания.\n"
-                "Верни ТОЛЬКО JSON-массив строк.\n\n"
+                "Верни ТОЛЬКО JSON-объект вида {\"items\": [\"тема\", ...]} без Markdown.\n\n"
                 f"ДОКУМЕНТ (ФРАГМЕНТЫ):\n{sample}"
             )
-            raw = invoke(ctx.llm, prompt)
-            try:
-                data = safe_json_loads(raw)
-                topics = [str(x).strip() for x in (data or []) if str(x).strip()]
-            except Exception as exc:
-                logger.warning("PlannerAgent: topics parse failed (%s): %s", f.file_name, exc)
-                topics = []
+            raw = invoke(ctx.llm, prompt, should_cancel=ctx.should_cancel)
+            topics = _parse_topic_list(ctx.llm, raw, f.file_name, should_cancel=ctx.should_cancel)
             per_file_topics[f.file_id] = topics[:target]
 
         ctx.per_file_topics = per_file_topics
@@ -167,6 +215,8 @@ class EvidenceAgent(Agent):
     def run(self, ctx: QAContext) -> QAContext:
         per_file_evidence: dict[str, list[dict[str, Any]]] = {}
         for f in ctx.files:
+            if _cancelled(ctx):
+                return ctx
             store = ctx.stores.get(f.file_id)
             chunks = ctx.normalized_chunks.get(f.file_id, [])[: settings.rag_max_chunks]
             if not store:
@@ -181,6 +231,8 @@ class EvidenceAgent(Agent):
                 topics = ctx.per_file_topics.get(f.file_id) or ["ключевые факты"]
                 evidence_items: list[dict[str, Any]] = []
                 for topic in topics:
+                    if _cancelled(ctx):
+                        return ctx
                     topic_tokens = set(normalize_text(topic).split())
                     if not topic_tokens:
                         selected = chunks[: settings.rag_top_k]
@@ -204,6 +256,8 @@ class EvidenceAgent(Agent):
 
             evidence_items: list[dict[str, Any]] = []
             for topic in topics:
+                if _cancelled(ctx):
+                    return ctx
                 docs = retriever.get_relevant_documents(topic)[: settings.rag_top_k]
                 if not docs:
                     continue
@@ -227,12 +281,16 @@ class QGenAgent(Agent):
         assert ctx.llm is not None
 
         for f in ctx.files:
+            if _cancelled(ctx):
+                return ctx
             evidence_items = ctx.per_file_evidence.get(f.file_id, [])
             quota = max(2, ctx.requested_total // max(1, len(ctx.files)))
             target_raw = quota * 3
 
             questions: list[dict[str, Any]] = []
             for ev in evidence_items:
+                if _cancelled(ctx):
+                    return ctx
                 used_questions = [
                     q.get("question", "")
                     for q in questions
@@ -259,17 +317,16 @@ class QGenAgent(Agent):
                     "- Язык: русский.\n"
                     "- Каждый вопрос должен покрывать НОВЫЙ факт; не повторяй идеи.\n"
                     f"- Нужно до {min(settings.rag_questions_per_topic, 6)} вопросов.\n"
-                    "- Верни ТОЛЬКО JSON-массив объектов без Markdown и пояснений.\n"
-                    "- JSON должен начинаться с '[' и быть валидным.\n"
-                    "Верни ТОЛЬКО JSON-массив объектов:\n"
+                    "- Верни ТОЛЬКО JSON-объект вида {\"items\": [...]} без Markdown и пояснений.\n"
+                    "Формат элементов:\n"
                     "{type, question, answer, options, correct_index, tags, sources, evidence}\n\n"
                     f"ТЕМА: {topic}\n"
                     f"СЛОЖНОСТЬ: {ctx.difficulty}\n\n"
                     f"{avoid_block}\n\nКОНТЕКСТ:\n{context}"
                 )
 
-                raw = invoke(ctx.llm, prompt)
-                data = _parse_qgen_payload(ctx.llm, raw, f.file_name)
+                raw = invoke(ctx.llm, prompt, should_cancel=ctx.should_cancel)
+                data = _parse_qgen_payload(ctx.llm, raw, f.file_name, should_cancel=ctx.should_cancel)
                 if not data:
                     continue
 
@@ -314,6 +371,8 @@ class VerifierAgent(Agent):
 
 class MixerAgent(Agent):
     def run(self, ctx: QAContext) -> QAContext:
+        if _cancelled(ctx):
+            return ctx
         all_items: list[dict[str, Any]] = []
         per_file_quota = max(1, ctx.requested_total // max(1, len(ctx.files)))
 

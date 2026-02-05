@@ -45,46 +45,8 @@ def gemini_embeddings() -> GoogleGenerativeAIEmbeddings:
     return GoogleGenerativeAIEmbeddings(**kwargs)
 
 
-class OpenRouterChatClient:
-    def __init__(
-        self,
-        api_key: str,
-        model: str,
-        base_url: str,
-        referer: str | None = None,
-        app_name: str | None = None,
-        timeout: float = 60.0,
-    ) -> None:
-        base = base_url.rstrip("/")
-        self._url = f"{base}/chat/completions"
-        self._model = model
-        self._headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        if referer:
-            self._headers["HTTP-Referer"] = referer
-        if app_name:
-            self._headers["X-Title"] = app_name
-        self._client = httpx.Client(timeout=timeout)
 
-    def invoke(self, prompt: str) -> str:
-        payload = {
-            "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-        }
-        response = self._client.post(self._url, headers=self._headers, json=payload)
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise RuntimeError(f"OpenRouter error {response.status_code}: {response.text}") from exc
-        data = response.json()
-        choices = data.get("choices") or []
-        if not choices:
-            raise RuntimeError(f"OpenRouter returned no choices: {data}")
-        message = choices[0].get("message") or {}
-        return str(message.get("content", "")).strip()
+
 
 
 class LocalSentenceTransformerEmbeddings(Embeddings):
@@ -152,25 +114,7 @@ def local_embeddings() -> Embeddings:
     return embeddings
 
 
-def openrouter_client() -> OpenRouterChatClient:
-    api_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is required when llm_provider=openrouter")
-    referer = settings.openrouter_http_referer or settings.web_base_url
-    app_name = settings.openrouter_app_name
-    return OpenRouterChatClient(
-        api_key=api_key,
-        model=settings.openrouter_model,
-        base_url=settings.openrouter_base_url,
-        referer=referer,
-        app_name=app_name,
-    )
-
-
 def build_llm() -> Any:
-    provider = (settings.llm_provider or "gemini").strip().lower()
-    if provider == "openrouter":
-        return openrouter_client()
     return gemini_client()
 
 
@@ -181,10 +125,34 @@ def build_embeddings() -> Embeddings:
     return gemini_embeddings()
 
 
-def invoke(llm: Any, prompt: str, attempts: int = 3) -> str:
+def _should_cancel(should_cancel: Any | None) -> bool:
+    return bool(should_cancel and should_cancel())
+
+
+def _sleep_with_cancel(seconds: float, should_cancel: Any | None) -> None:
+    if seconds <= 0:
+        return
+    if should_cancel is None:
+        time.sleep(seconds)
+        return
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if _should_cancel(should_cancel):
+            return
+        time.sleep(min(0.5, max(0.0, deadline - time.time())))
+
+
+def invoke(
+    llm: Any,
+    prompt: str,
+    attempts: int = 4,
+    should_cancel: Any | None = None,
+) -> str:
     last: Exception | None = None
     retry_re = re.compile(r"retry(?:_delay)?[^0-9]*([0-9]+(?:\\.[0-9]+)?)", re.IGNORECASE)
     for _ in range(attempts):
+        if _should_cancel(should_cancel):
+            return ""
         try:
             msg = llm.invoke(prompt)
             content = getattr(msg, "content", msg)
@@ -194,6 +162,11 @@ def invoke(llm: Any, prompt: str, attempts: int = 3) -> str:
         except Exception as exc:
             last = exc
             logger.warning("LLM invoke failed: %s", exc)
+            lowered = str(exc).lower()
+            if "insufficient credits" in lowered or "payment required" in lowered:
+                break
+            if _should_cancel(should_cancel):
+                return ""
             wait_seconds = 0.0
             match = retry_re.search(str(exc))
             if match:
@@ -201,6 +174,13 @@ def invoke(llm: Any, prompt: str, attempts: int = 3) -> str:
                     wait_seconds = float(match.group(1))
                 except ValueError:
                     wait_seconds = 0.0
+            if not wait_seconds:
+                lowered = str(exc).lower()
+                if "network connection lost" in lowered or " 502" in lowered or "code 502" in lowered:
+                    # Exponential backoff for transient provider errors.
+                    wait_seconds = min(2 ** (_ + 1), 20.0)
             if wait_seconds > 0:
-                time.sleep(min(wait_seconds, 60.0))
+                _sleep_with_cancel(min(wait_seconds, 60.0), should_cancel)
+        if _should_cancel(should_cancel):
+            return ""
     raise RuntimeError(f"LLM invoke failed after {attempts} attempts: {last}")
