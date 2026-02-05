@@ -33,7 +33,7 @@ const MODES: { value: JobMode; label: string; description: string }[] = [
   }
 ];
 
-const LLM_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free";
+const LLM_MODEL = "gemini-3-flash-preview";
 
 const DIFFICULTIES: JobDifficulty[] = ["easy", "medium", "hard"];
 const STAGE_LABELS: Record<string, string> = {
@@ -218,8 +218,17 @@ export default function GenerationPage() {
     ) {
       return "Квота эмбеддингов Gemini исчерпана. Запусти повтор или отключи embeddings.";
     }
-    if (lowered.includes("openrouter") || lowered.includes("rate limit") || lowered.includes("429")) {
-      return "Квота OpenRouter исчерпана или включен лимит. Попробуй позже или смени модель.";
+    if (lowered.includes("network connection lost") || lowered.includes("502") || lowered.includes("gateway")) {
+      return "Сетевая ошибка у провайдера LLM. Подожди минуту и повтори.";
+    }
+    if (lowered.includes("insufficient credits") || lowered.includes("payment required") || lowered.includes(" 402")) {
+      return "Недостаточно кредитов у провайдера. Пополни баланс или смени ключ.";
+    }
+    if (lowered.includes("rate limit") || lowered.includes("429")) {
+      return "Лимит запросов у провайдера. Подожди и повтори.";
+    }
+    if (lowered.includes("provider returned error") || lowered.includes("upstream")) {
+      return "Ошибка у провайдера модели. Попробуй повторить позже или сменить модель.";
     }
     if (lowered.includes("generate_content") || lowered.includes("generate") || lowered.includes("quota")) {
       return "Квота Gemini на генерацию исчерпана. Подожди и повтори, либо используй другой API‑ключ/модель.";
