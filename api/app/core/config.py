@@ -27,15 +27,10 @@ class Settings(BaseSettings):
     clamav_port: int = 3310
     clamav_required: bool = False
 
-    llm_provider: str = "gemini"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash-lite"
     gemini_embedding_model: str = "models/embedding-001"
-    openrouter_api_key: str | None = None
-    openrouter_model: str = "qwen/qwen3-next-80b-a3b-instruct:free"
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_http_referer: str = ""
-    openrouter_app_name: str = "codex-anki"
+    llm_request_timeout_seconds: float = 60.0
     chroma_path: str = "./data/chroma"
     rag_top_k: int = 5
     rag_min_topics: int = 3
