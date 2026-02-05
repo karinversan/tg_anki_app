@@ -10,6 +10,8 @@ from app.services.qa.agents import (
     SetupAgent,
     VerifierAgent,
 )
+from typing import Callable
+
 from app.services.qa.types import FileInput, QAContext
 from app.services.qa.utils import merge_per_file_outputs
 
@@ -18,8 +20,14 @@ def generate_questions_for_files(
     files: list[FileInput],
     requested_total: int,
     difficulty: str,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[list[dict], dict]:
-    ctx = QAContext(files=files, requested_total=requested_total, difficulty=difficulty)
+    ctx = QAContext(
+        files=files,
+        requested_total=requested_total,
+        difficulty=difficulty,
+        should_cancel=should_cancel,
+    )
 
     pipeline = [
         SetupAgent(),

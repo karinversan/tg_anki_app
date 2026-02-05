@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
@@ -21,6 +21,7 @@ class QAContext:
     difficulty: str
     llm: Any | None = None
     embeddings: Embeddings | None = None
+    should_cancel: Callable[[], bool] | None = None
     stores: dict[str, Chroma] = field(default_factory=dict)
     normalized_chunks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     per_file_questions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)

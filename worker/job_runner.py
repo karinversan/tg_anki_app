@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -100,7 +101,25 @@ def _build_file_inputs(topic_id: uuid.UUID, payloads: Iterable[FilePayload]) -> 
 async def run_generation_job(job_id: str) -> None:
     engine = create_async_engine(settings.database_url, echo=False)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    cancel_event = asyncio.Event()
+    poll_task: asyncio.Task | None = None
     try:
+        def should_cancel() -> bool:
+            return cancel_event.is_set()
+
+        async def poll_cancel() -> None:
+            while not cancel_event.is_set():
+                try:
+                    async with session_factory() as poll_session:
+                        job_row = await _load_job(poll_session, job_id)
+                        if job_row.status == "cancelled":
+                            cancel_event.set()
+                            return
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+
+        poll_task = asyncio.create_task(poll_cancel())
         async with session_factory() as session:
             logger.info("Start job %s", job_id)
             job = await _load_job(session, job_id)
@@ -137,9 +156,15 @@ async def run_generation_job(job_id: str) -> None:
 
                 payloads: list[FilePayload] = []
                 for record in files:
+                    if should_cancel():
+                        logger.info("Job %s cancelled during extraction", job_id)
+                        return
                     content = read_encrypted_file(record.storage_path, record.encryption_nonce)
                     text = extract_text(record.mime_type, content)
                     payloads.append(FilePayload(filename=record.original_filename, text=text))
+                if should_cancel():
+                    logger.info("Job %s cancelled during extraction", job_id)
+                    return
 
                 await _update_job(session, job, stage="chunking", progress=_stage_progress("chunking"))
 
@@ -173,16 +198,28 @@ async def run_generation_job(job_id: str) -> None:
                     outputs: list[list[dict]] = []
                     per_file_count = max(3, requested_total // max(1, len(file_inputs)))
                     for file_input in file_inputs:
+                        if should_cancel():
+                            logger.info("Job %s cancelled during generation", job_id)
+                            return
                         per_questions, metrics = generate_questions_for_files(
                             [file_input],
                             per_file_count,
                             difficulty,
+                            should_cancel=should_cancel,
                         )
                         logger.info("Agent metrics (%s): %s", file_input.file_name, metrics)
                         outputs.append(per_questions)
+                    if should_cancel():
+                        logger.info("Job %s cancelled during generation", job_id)
+                        return
                     questions = merge_per_file_outputs(outputs, requested_total)
                 else:
-                    questions, metrics = generate_questions_for_files(file_inputs, requested_total, difficulty)
+                    questions, metrics = generate_questions_for_files(
+                        file_inputs,
+                        requested_total,
+                        difficulty,
+                        should_cancel=should_cancel,
+                    )
                     logger.info("Agent metrics: %s", metrics)
 
                 if await _is_cancelled(session, job):
@@ -240,4 +277,8 @@ async def run_generation_job(job_id: str) -> None:
                     finished_at=datetime.utcnow(),
                 )
     finally:
+        cancel_event.set()
+        if poll_task:
+            poll_task.cancel()
+            await asyncio.gather(poll_task, return_exceptions=True)
         await engine.dispose()
