@@ -1,0 +1,45 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.tox/
+.coverage
+coverage/
+htmlcov/
+.hypothesis/
+.cache/
+*.log
+
+# Virtual environments
+.venv
+.env
+.env.*
+.envrc
+.direnv/
+data/
+storage/
+
+# Node/Frontend
+node_modules/
+dist/
+.vite/
+.eslintcache
+.npm/
+.yarn/
+.pnp.*
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+results
