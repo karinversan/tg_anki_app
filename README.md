@@ -9,6 +9,20 @@
 - Дедупликация вопросов и базовая валидация качества.
 - Экспорт в `.apkg`, готовый к импорту в Anki.
 
+## Скриншоты
+
+<p>
+  <img src="imgs/screenshots/telegram-open-miniapp.png" width="220" alt="Telegram bot entry" />
+  <img src="imgs/screenshots/web-topics.png" width="220" alt="Topics list" />
+  <img src="imgs/screenshots/web-files-empty.png" width="220" alt="Empty files state" />
+</p>
+
+<p>
+  <img src="imgs/screenshots/web-files-with-pdf.png" width="220" alt="Files with PDF" />
+  <img src="imgs/screenshots/web-generation-params.png" width="220" alt="Generation params" />
+  <img src="imgs/screenshots/web-generation-progress.png" width="220" alt="Generation progress" />
+</p>
+
 ## Архитектура
 
 ```
@@ -78,7 +92,6 @@
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-SVG‑версия (можно заменить своей): `docs/assets/architecture.svg`.
 
 **Сервисы**
 - `bot/` — aiogram‑бот, открывает Mini App и управляет доступом.
