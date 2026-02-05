@@ -1,23 +1,124 @@
-# Telegram Anki MVP
+# Telegram Anki
 
-Production-ready monorepo for a Telegram bot + Mini App for anki cards generation.
+Полноценный бот для генерации Anki‑колод из учебных материалов с помощью Telegram‑бота и Mini App. Проект включает веб‑интерфейс, API, асинхронного воркера, хранение файлов и AI‑пайплайн генерации.
 
-## Services
-- `bot/` — aiogram bot
-- `api/` — FastAPI backend
-- `worker/` — Celery worker
-- `web/` — React Mini App
-- `infra/` — Docker, migrations, scripts
+## Основные возможности
+- Загрузка PDF/DOCX/TXT и генерация Anki‑колод.
+- Асинхронная обработка через Celery + Redis.
+- Локальные эмбеддинги и RAG‑retrieval для «привязки» к источнику.
+- Дедупликация вопросов и базовая валидация качества.
+- Экспорт в `.apkg`, готовый к импорту в Anki.
 
-## Quick start
+## Архитектура
+
+Если Mermaid не отображается, можно использовать `docs/assets/architecture.svg`.
+
+**Сервисы**
+- `bot/` — aiogram‑бот, открывает Mini App и управляет доступом.
+- `web/` — React Mini App UI (Telegram WebApp SDK).
+- `api/` — FastAPI backend (auth, темы, файлы, запуск задач).
+- `worker/` — Celery‑воркер (извлечение, генерация, экспорт).
+- `infra/` — Dockerfiles, compose, миграции.
+- `data/` / `storage/` — зашифрованное хранение файлов и экспортов.
+
+## AI‑пайплайн генерации (подробнее)
+
+__Здесь будет схема__
+
+Ниже — как устроена генерация и зачем нужен каждый шаг.
+
+### 1) Извлечение текста (Extraction)
+**Что делает:** распаковывает входные файлы (PDF/DOCX/TXT) в чистый текст.  
+**Почему так:** нормализация входа нужна, чтобы работать с разными форматами одинаково.
+
+### 2) Чанкинг (Chunking)
+**Что делает:** режет текст на смысловые куски ~250–450 слов, overlap ~60 слов.  
+**Почему так:** LLM лучше работает с небольшими фрагментами; overlap сохраняет контекст на стыках и уменьшает потери смысла.
+
+### 3) Нормализация чанков (Normalize)
+**Что делает:** очищает и унифицирует фрагменты (обрезка пустых, нормализация пробелов).  
+**Почему так:** уменьшает шум в retrieval и повышает стабильность генерации.
+
+### 4) Индексация и Retrieval (Index / Retrieval)
+**Что делает:** строит векторный индекс (Chroma + embeddings); если embeddings недоступны — fallback на лексическое извлечение.  
+**Почему так:** retrieval подбирает релевантные фрагменты под каждую тему, снижая «галлюцинации».
+
+### 5) Планирование тем (Plan Topics)
+**Что делает:** LLM строит список ключевых тем для каждого файла.  
+**Почему так:** обеспечивает равномерное покрытие и снижает повторения.
+
+### 6) Пакеты доказательств (Evidence Packets)
+**Что делает:** собирает короткие контекстные блоки для каждой темы.  
+**Почему так:** QGen получает только релевантные факты, а не весь документ.
+
+### 7) Генерация вопросов (QGen)
+**Что делает:** генерирует open/mcq/tf‑вопросы + ответы + источники.  
+**Почему так:** стандартизированный формат облегчает экспорт в Anki и последующую проверку.
+
+### 8) Проверка и теги (Verify)
+**Что делает:** отмечает вопросы без источников (например, тегом `unverified`).  
+**Почему так:** помогает отсекать «сомнительные» вопросы при финальной сборке.
+
+### 9) Микс и дедупликация (Mix + Dedupe)
+**Что делает:** объединяет вопросы с разных файлов и удаляет повторы (simhash + Jaccard по токенам/символьным n‑граммам).  
+**Почему так:** экономит место в колоде и повышает разнообразие карточек.
+
+### 10) Экспорт (Export APKG)
+**Что делает:** формирует `.apkg` через genanki.  
+**Почему так:** Anki‑колода сразу готова к импорту.
+
+## Запуск проекта
+
+### Быстрый старт (Docker)
 ```bash
 cp .env.example .env
-# fill required secrets in .env (BOT_TOKEN, JWT_SECRET, ENCRYPTION_KEY_BASE64)
-# set GEMINI_API_KEY for generation and WEB_BASE_URL for Telegram WebApp
+# заполнить обязательные секреты:
+# BOT_TOKEN, JWT_SECRET, ENCRYPTION_KEY_BASE64, GEMINI_API_KEY
 
 docker compose up --build
 ```
 
-## URLs
+Сервисы:
 - API: http://localhost:8000
 - Web: http://localhost:5173
+
+### Полезные команды
+```bash
+make dev       # полный стек в Docker
+make lint      # ruff + eslint
+make test      # pytest
+make migrate   # Alembic migrations
+```
+
+### Локальный запуск (без Docker)
+```bash
+uvicorn api.app.main:app --reload
+python -m app.main          # bot
+celery -A worker.app.celery_app worker -l info
+```
+
+## Конфигурация
+Минимально нужны:
+- `BOT_TOKEN` — токен Telegram‑бота
+- `JWT_SECRET` — секрет для JWT
+- `ENCRYPTION_KEY_BASE64` — 32 байта (AES‑GCM)
+- `GEMINI_API_KEY` — ключ LLM генерации
+
+Дополнительно:
+- `RAG_USE_EMBEDDINGS=true` включает embeddings
+- `EMBEDDING_PROVIDER=local` для локальных эмбеддингов
+
+## Что важно знать
+- Файлы хранятся **зашифрованно** (AES‑GCM).
+- При проблемах с embeddings включается **лексический fallback**.
+- Отмена/перезапуск генерации автоматически завершает старые задачи.
+
+## Структура репозитория
+```
+api/        FastAPI + SQLAlchemy + Alembic
+worker/     Celery pipeline
+bot/        Telegram bot (aiogram)
+web/        React Mini App (Vite)
+infra/      Docker + scripts
+data/       runtime data (encrypted files, exports)
+```
