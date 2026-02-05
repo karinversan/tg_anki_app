@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash-lite"
     gemini_embedding_model: str = "models/embedding-001"
-    llm_request_timeout_seconds: float = 60.0
     chroma_path: str = "./data/chroma"
     rag_top_k: int = 5
     rag_min_topics: int = 3

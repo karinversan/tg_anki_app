@@ -8,8 +8,6 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
-import httpx
-
 from langchain_core.embeddings import Embeddings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
