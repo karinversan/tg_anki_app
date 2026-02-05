@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tg_anki}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  clamav:
+    image: clamav/clamav:latest
+    platform: linux/amd64
+    ports:
+      - "3310:3310"
+
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    env_file: ./.env
+    depends_on:
+      - postgres
+      - redis
+      - clamav
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./api:/app/api
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.worker
+    env_file: ./.env
+    depends_on:
+      - postgres
+      - redis
+      - clamav
+    volumes:
+      - ./data:/app/data
+      - ./api:/app/api
+      - ./worker:/app/worker
+
+  bot:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.bot
+    env_file: ./.env
+    depends_on:
+      - api
+    volumes:
+      - ./bot:/app/bot
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.web
+    env_file: ./.env
+    depends_on:
+      - api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app/web
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0 --port 5173"]
+volumes:
+  pg_data:
