@@ -5,13 +5,10 @@
 Use `docker-compose.yml` from repo root.  
 It is already production-oriented for Dokploy:
 - no local bind mounts from your laptop;
+- no host `ports` bindings (no port conflicts with other projects);
 - persistent Docker volumes for Postgres and app data;
 - web runs as built Vite app (`vite preview` on port `4173`);
 - API runs migrations on startup.
-
-For local development you do not need another deploy flow:
-- `docker-compose.override.yml` is applied automatically by Docker Compose on your machine;
-- it switches web/api to dev ports and mounts source code.
 
 ## 2. Create app in Dokploy
 
@@ -27,6 +24,7 @@ Add variables from `.env.example`, then override at least these:
 
 ```env
 APP_ENV=production
+STACK_NAME=tg_anki_prod
 
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=<strong-password>
@@ -54,6 +52,8 @@ openssl rand -base64 32
 ```
 
 If Ollama is not on the same host, use remote provider (`LLM_PROVIDER=gemini`) or point `OLLAMA_BASE_URL` to reachable endpoint.
+
+`STACK_NAME` must be unique per project on one server, so Docker object names (`network`, `volumes`, containers) do not collide.
 
 ## 4. Domains and HTTPS in Dokploy
 

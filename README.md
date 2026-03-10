@@ -201,18 +201,24 @@
 cp .env.example .env
 # заполнить обязательные секреты:
 # BOT_TOKEN, JWT_SECRET, ENCRYPTION_KEY_BASE64
+# задай уникальное имя стека для этого проекта (важно при нескольких compose-проектах на одном сервере)
+# STACK_NAME=tg_anki_prod
 
-docker compose up --build
+docker compose up -d --build
+# или разово без правки .env:
+# STACK_NAME=tg_anki_prod docker compose up -d --build
 ```
 
-Сервисы:
-- API: http://localhost:8000
-- Web: http://localhost:5173
+Особенности этого compose:
+- используется только один файл `docker-compose.yml`;
+- нет `ports` на хосте, поэтому нет конфликтов портов с другими проектами;
+- для доступа снаружи используй домены через Dokploy (`app.example.com`, `api.example.com`).
 
 ### Полезные команды
 ```bash
-docker compose up --build
+docker compose up -d --build
 docker compose logs -f api worker
+docker compose ps
 ```
 
 ### Локальная модель (Ollama + Metal на macOS)
@@ -240,7 +246,7 @@ python -m app.main          # bot
 celery -A worker.app.celery_app worker -l info
 ```
 
-## Telegram setup (ngrok + BotFather)
+## Telegram setup (локально, без Docker)
 1) Подними локально Web App (порт 5173) и API (порт 8000).
 2) Получи HTTPS‑URL через ngrok (или аналог), например `ngrok http 5173`.
 3) Пропиши `WEB_BASE_URL` в `.env` равным HTTPS‑URL (домен должен совпадать с Web App).
@@ -259,6 +265,7 @@ celery -A worker.app.celery_app worker -l info
 
 ## Конфигурация
 Минимально нужны:
+- `STACK_NAME` — уникальное имя docker compose-стека (например, `tg_anki_prod`)
 - `BOT_TOKEN` — токен Telegram‑бота
 - `JWT_SECRET` — секрет для JWT
 - `ENCRYPTION_KEY_BASE64` — 32 байта (AES‑GCM)
