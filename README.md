@@ -249,6 +249,14 @@ celery -A worker.app.celery_app worker -l info
    - (Опционально) Настрой Mini App в профиле бота через `Bot Settings → Configure Mini App`.
 5) Перезапусти сервисы и открывай Web App через кнопку в боте.
 
+## Deploy on Dokploy (production)
+- Используй файл `docker-compose.dokploy.yml` из корня репозитория.
+- Подробная пошаговая инструкция (GitHub app, env, domains, HTTPS для Mini App):
+  - `docs/dokploy.md`
+- Рекомендуемая схема доменов:
+  - `app.example.com` -> web service
+  - `api.example.com` -> api service
+
 ## Конфигурация
 Минимально нужны:
 - `BOT_TOKEN` — токен Telegram‑бота
