@@ -5,8 +5,10 @@
 ## Основные возможности
 - Загрузка PDF/DOCX/TXT и генерация Anki‑колод.
 - Асинхронная обработка через Celery + Redis.
+- Локальная LLM‑генерация через Ollama (поддержка GPU/Metal на macOS).
 - Локальные эмбеддинги и RAG‑retrieval для «привязки» к источнику.
 - Дедупликация вопросов и базовая валидация качества.
+- Сохранение метрик генерации: latency, throughput, stage timings, dedupe и др.
 - Экспорт в `.apkg`, готовый к импорту в Anki.
 
 ## Скриншоты
@@ -198,7 +200,7 @@
 ```bash
 cp .env.example .env
 # заполнить обязательные секреты:
-# BOT_TOKEN, JWT_SECRET, ENCRYPTION_KEY_BASE64, GEMINI_API_KEY
+# BOT_TOKEN, JWT_SECRET, ENCRYPTION_KEY_BASE64
 
 docker compose up --build
 ```
@@ -212,6 +214,18 @@ docker compose up --build
 docker compose up --build
 docker compose logs -f api worker
 ```
+
+### Локальная модель (Ollama + Metal на macOS)
+```bash
+ollama serve
+ollama pull qwen2.5:3b-instruct-q4_K_M
+```
+
+Проверь значения в `.env`:
+- `LLM_PROVIDER=ollama`
+- `LOCAL_LLM_MODEL=qwen2.5:3b-instruct-q4_K_M`
+- `OLLAMA_BASE_URL=http://host.docker.internal:11434` (для Docker сервисов `api/worker`)
+- `OLLAMA_NUM_GPU=-1` (автовыбор; на macOS Ollama использует Metal автоматически)
 
 Если используешь uv локально:
 ```bash
@@ -240,11 +254,28 @@ celery -A worker.app.celery_app worker -l info
 - `BOT_TOKEN` — токен Telegram‑бота
 - `JWT_SECRET` — секрет для JWT
 - `ENCRYPTION_KEY_BASE64` — 32 байта (AES‑GCM)
-- `GEMINI_API_KEY` — ключ LLM генерации
 
 Дополнительно:
+- `LLM_PROVIDER=ollama` — локальная генерация через Ollama
+- `LOCAL_LLM_MODEL=qwen2.5:3b-instruct-q4_K_M` — лёгкая модель по умолчанию
+- `OLLAMA_BASE_URL=http://host.docker.internal:11434` — URL Ollama для контейнеров
+- `GEMINI_API_KEY` — только если используешь `LLM_PROVIDER=gemini`
 - `RAG_USE_EMBEDDINGS=true` включает embeddings
 - `EMBEDDING_PROVIDER=local` для локальных эмбеддингов
+- `RAG_REUSE_VECTOR_STORE=true` — переиспользовать существующий Chroma-индекс (сильно ускоряет повторные генерации)
+- `JOB_EXTRACT_CONCURRENCY=4` — параллелизм извлечения текста
+- `JOB_CHUNK_CONCURRENCY=4` — параллелизм chunking
+
+## Метрики и бенчмарк
+После нескольких запусков генерации можно собрать агрегированный отчёт:
+
+```bash
+uv run python scripts/generation_metrics_report.py --limit 50 \
+  --json-out results/metrics-summary.json \
+  --md-out results/metrics-summary.md
+```
+
+Скрипт считает ключевые метрики для резюме: `p50/p95` по времени, скорость генерации, среднюю LLM latency, число вызовов, dedupe и stage timings.
 
 ## Что важно знать
 - Файлы хранятся **зашифрованно** (AES‑GCM).
