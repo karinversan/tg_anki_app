@@ -5,12 +5,13 @@ import logging
 import re
 from typing import Any
 
+import chromadb
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 
 from app.core.config import settings
 from app.services.dedupe import dedupe_questions
-from app.services.qa.clients import build_embeddings, build_llm, invoke
+from app.services.qa.clients import build_embeddings, build_llm, invoke, llm_descriptor
 from app.services.qa.types import Agent, QAContext
 from app.services.qa.utils import (
     build_context_packet,
@@ -35,6 +36,7 @@ def _parse_qgen_payload(
     raw: str,
     file_name: str,
     should_cancel: Any | None = None,
+    metrics: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     max_retries = max(0, settings.llm_json_retries)
     last_exc: Exception | None = None
@@ -57,7 +59,13 @@ def _parse_qgen_payload(
                 "Никакого текста вне JSON. Если исправить нельзя, верни {\"items\": []}.\n\n"
                 f"ОТВЕТ:\n{snippet}"
             )
-            raw = invoke(llm, repair_prompt, should_cancel=should_cancel)
+            raw = invoke(
+                llm,
+                repair_prompt,
+                should_cancel=should_cancel,
+                metrics=metrics,
+                operation="json_repair",
+            )
     logger.warning("QGenAgent parse failed (%s): %s", file_name, last_exc)
     return []
 
@@ -67,6 +75,7 @@ def _parse_topic_list(
     raw: str,
     file_name: str,
     should_cancel: Any | None = None,
+    metrics: dict[str, Any] | None = None,
 ) -> list[str]:
     max_retries = max(0, settings.llm_json_retries)
     last_exc: Exception | None = None
@@ -93,7 +102,13 @@ def _parse_topic_list(
                 "Никакого текста вне JSON. Если исправить нельзя, верни {\"items\": []}.\n\n"
                 f"ОТВЕТ:\n{snippet}"
             )
-            raw = invoke(llm, repair_prompt, should_cancel=should_cancel)
+            raw = invoke(
+                llm,
+                repair_prompt,
+                should_cancel=should_cancel,
+                metrics=metrics,
+                operation="json_repair",
+            )
     logger.warning("PlannerAgent: topics parse failed (%s): %s", file_name, last_exc)
     return []
 
@@ -101,6 +116,7 @@ def _parse_topic_list(
 class SetupAgent(Agent):
     def run(self, ctx: QAContext) -> QAContext:
         ctx.llm = ctx.llm or build_llm()
+        ctx.metrics.setdefault("llm", {}).update(llm_descriptor(ctx.llm))
         if settings.rag_use_embeddings:
             if ctx.embeddings is None:
                 try:
@@ -135,6 +151,17 @@ class IndexPerFileAgent(Agent):
             ctx.metrics["indexed_files"] = 0
             return ctx
         base_dir = settings.chroma_path
+        reuse_enabled = bool(settings.rag_reuse_vector_store)
+        reused_files = 0
+        indexed_new_files = 0
+        persistent_client: chromadb.PersistentClient | None = None
+        if reuse_enabled:
+            try:
+                persistent_client = chromadb.PersistentClient(path=str(base_dir))
+            except Exception as exc:
+                logger.warning("Vector-store reuse init failed; fallback to rebuild: %s", exc)
+                ctx.metrics["vector_reuse_error"] = str(exc)
+                reuse_enabled = False
 
         for f in ctx.files:
             if _cancelled(ctx):
@@ -144,8 +171,8 @@ class IndexPerFileAgent(Agent):
             chunks = ctx.normalized_chunks.get(f.file_id, [])
             if not chunks:
                 continue
-            hashes = [chunk_hash(f.file_id, ch) for ch in chunks]
-            content_hash = hashlib.sha256("".join(hashes).encode("utf-8")).hexdigest()
+            chunk_ids = [chunk_hash(f.file_id, ch) for ch in chunks]
+            content_hash = hashlib.sha256("".join(chunk_ids).encode("utf-8")).hexdigest()
             collection_name = f"file_{re.sub(r'[^a-zA-Z0-9_-]+','_', f.file_id)[:32]}_{content_hash[:8]}"
 
             docs = [
@@ -161,14 +188,31 @@ class IndexPerFileAgent(Agent):
                 for ch in chunks
             ]
 
+            if reuse_enabled and persistent_client is not None:
+                try:
+                    existing = persistent_client.get_collection(collection_name)
+                    if existing.count() >= len(chunk_ids):
+                        store = Chroma(
+                            collection_name=collection_name,
+                            embedding_function=ctx.embeddings,
+                            persist_directory=str(base_dir),
+                        )
+                        ctx.stores[f.file_id] = store
+                        reused_files += 1
+                        continue
+                except Exception:
+                    pass
+
             try:
                 store = Chroma.from_documents(
                     docs,
                     ctx.embeddings,
+                    ids=chunk_ids,
                     collection_name=collection_name,
                     persist_directory=str(base_dir),
                 )
                 ctx.stores[f.file_id] = store
+                indexed_new_files += 1
             except Exception as exc:
                 logger.warning("Embeddings unavailable; falling back to lexical retrieval: %s", exc)
                 ctx.metrics["embeddings_error"] = str(exc)
@@ -177,6 +221,8 @@ class IndexPerFileAgent(Agent):
                 break
 
         ctx.metrics["indexed_files"] = len(ctx.stores)
+        ctx.metrics["indexed_reused_files"] = reused_files
+        ctx.metrics["indexed_new_files"] = indexed_new_files
         return ctx
 
 
@@ -202,8 +248,20 @@ class PlannerAgent(Agent):
                 "Верни ТОЛЬКО JSON-объект вида {\"items\": [\"тема\", ...]} без Markdown.\n\n"
                 f"ДОКУМЕНТ (ФРАГМЕНТЫ):\n{sample}"
             )
-            raw = invoke(ctx.llm, prompt, should_cancel=ctx.should_cancel)
-            topics = _parse_topic_list(ctx.llm, raw, f.file_name, should_cancel=ctx.should_cancel)
+            raw = invoke(
+                ctx.llm,
+                prompt,
+                should_cancel=ctx.should_cancel,
+                metrics=ctx.metrics,
+                operation="planner_topics",
+            )
+            topics = _parse_topic_list(
+                ctx.llm,
+                raw,
+                f.file_name,
+                should_cancel=ctx.should_cancel,
+                metrics=ctx.metrics,
+            )
             per_file_topics[f.file_id] = topics[:target]
 
         ctx.per_file_topics = per_file_topics
@@ -214,6 +272,8 @@ class PlannerAgent(Agent):
 class EvidenceAgent(Agent):
     def run(self, ctx: QAContext) -> QAContext:
         per_file_evidence: dict[str, list[dict[str, Any]]] = {}
+        if ctx.stores:
+            ctx.metrics.setdefault("retrieval_mode", "vector")
         for f in ctx.files:
             if _cancelled(ctx):
                 return ctx
@@ -273,6 +333,7 @@ class EvidenceAgent(Agent):
                 evidence_items.append({"topic": topic, "context": context})
             per_file_evidence[f.file_id] = evidence_items
         ctx.per_file_evidence = per_file_evidence
+        ctx.metrics["evidence_packets"] = sum(len(v) for v in per_file_evidence.values())
         return ctx
 
 
@@ -325,8 +386,20 @@ class QGenAgent(Agent):
                     f"{avoid_block}\n\nКОНТЕКСТ:\n{context}"
                 )
 
-                raw = invoke(ctx.llm, prompt, should_cancel=ctx.should_cancel)
-                data = _parse_qgen_payload(ctx.llm, raw, f.file_name, should_cancel=ctx.should_cancel)
+                raw = invoke(
+                    ctx.llm,
+                    prompt,
+                    should_cancel=ctx.should_cancel,
+                    metrics=ctx.metrics,
+                    operation="qgen",
+                )
+                data = _parse_qgen_payload(
+                    ctx.llm,
+                    raw,
+                    f.file_name,
+                    should_cancel=ctx.should_cancel,
+                    metrics=ctx.metrics,
+                )
                 if not data:
                     continue
 
@@ -346,6 +419,7 @@ class QGenAgent(Agent):
                     break
 
             ctx.per_file_questions[f.file_id] = questions[:target_raw]
+        ctx.metrics["raw_questions_total"] = sum(len(v) for v in ctx.per_file_questions.values())
         return ctx
 
 

@@ -26,6 +26,7 @@ class JobOut(APIModel):
     stage: str
     params_json: dict
     result_paths: dict | None
+    metrics_json: dict | None
     error_message: str | None
     created_at: datetime
     finished_at: datetime | None

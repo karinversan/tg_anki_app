@@ -4,11 +4,14 @@ import hashlib
 import re
 from typing import Iterable
 
+_WS_RE = re.compile(r"\s+")
+_NON_WORD_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
+
 
 def normalize(text: str) -> str:
     text = text.lower().strip()
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"[^a-z0-9\s]", "", text)
+    text = _WS_RE.sub(" ", text)
+    text = _NON_WORD_RE.sub("", text)
     return text
 
 
@@ -57,17 +60,30 @@ def _jaccard(a: Iterable[str], b: Iterable[str]) -> float:
 
 def dedupe_questions(questions: list[dict], max_distance: int = 3) -> list[dict]:
     seen: list[tuple[int, str, set[str], set[str]]] = []
+    band_index: dict[tuple[int, int], list[int]] = {}
+    exact_seen: set[str] = set()
     unique: list[dict] = []
+    band_size = 16
+    band_count = 64 // band_size
+
     for item in questions:
         q_text = item.get("question", "")
         norm = normalize(q_text)
-        if not norm:
+        if not norm or norm in exact_seen:
             continue
         h = simhash(norm)
         tokens = _token_set(norm)
         ngrams = _char_ngrams(norm)
         is_dupe = False
-        for existing_hash, existing_norm, existing_tokens, existing_ngrams in seen:
+
+        candidate_ids: set[int] = set()
+        for band in range(band_count):
+            mask = (1 << band_size) - 1
+            segment = (h >> (band * band_size)) & mask
+            candidate_ids.update(band_index.get((band, segment), []))
+
+        for idx in candidate_ids:
+            existing_hash, existing_norm, existing_tokens, existing_ngrams = seen[idx]
             if hamming_distance(h, existing_hash) <= max_distance:
                 if norm == existing_norm:
                     is_dupe = True
@@ -79,6 +95,12 @@ def dedupe_questions(questions: list[dict], max_distance: int = 3) -> list[dict]
                     is_dupe = True
                     break
         if not is_dupe:
+            exact_seen.add(norm)
             seen.append((h, norm, tokens, ngrams))
+            seen_idx = len(seen) - 1
+            for band in range(band_count):
+                mask = (1 << band_size) - 1
+                segment = (h >> (band * band_size)) & mask
+                band_index.setdefault((band, segment), []).append(seen_idx)
             unique.append(item)
     return unique

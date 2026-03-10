@@ -68,6 +68,7 @@ class GenerationJob(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     stage: Mapped[str] = mapped_column(String(64), default="queued")
     result_paths: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    metrics_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

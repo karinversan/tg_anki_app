@@ -18,8 +18,11 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        if not (settings.gemini_api_key or os.getenv("GOOGLE_API_KEY")):
-            logger.warning("GEMINI_API_KEY/GOOGLE_API_KEY is not set; generation will fail until provided.")
+        llm_provider = (settings.llm_provider or "").strip().lower()
+        if llm_provider == "gemini" and not (settings.gemini_api_key or os.getenv("GOOGLE_API_KEY")):
+            logger.warning("GEMINI_API_KEY/GOOGLE_API_KEY is not set; gemini generation will fail.")
+        if llm_provider in {"ollama", "local"}:
+            logger.info("LLM provider is local (%s): %s", llm_provider, settings.local_llm_model)
         yield
         await close_redis()
 

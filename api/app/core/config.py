@@ -28,7 +28,16 @@ class Settings(BaseSettings):
     clamav_required: bool = False
 
     gemini_api_key: str | None = None
+    llm_provider: str = "ollama"
     gemini_model: str = "gemini-2.5-flash-lite"
+    local_llm_model: str = "qwen2.5:3b-instruct-q4_K_M"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_request_timeout_seconds: int = 180
+    ollama_num_ctx: int = 4096
+    ollama_num_predict: int = 1024
+    ollama_num_gpu: int = -1
+    ollama_keep_alive: str = "30m"
+    ollama_temperature: float = 0.3
     gemini_embedding_model: str = "models/embedding-001"
     chroma_path: str = "./data/chroma"
     rag_top_k: int = 5
@@ -39,6 +48,7 @@ class Settings(BaseSettings):
     rag_questions_per_topic: int = 6
     rag_judge_batch_size: int = 8
     rag_use_embeddings: bool = True
+    rag_reuse_vector_store: bool = True
     embedding_provider: str = "gemini"
     embedding_init_backoff_seconds: int = 300
     local_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -60,6 +70,8 @@ class Settings(BaseSettings):
     rate_limit_uploads_per_minute: int = 10
     max_files_per_topic: int = 10
     max_file_size_mb: int = 20
+    job_extract_concurrency: int = 4
+    job_chunk_concurrency: int = 4
 
 
 settings = Settings()
