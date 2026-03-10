@@ -5,21 +5,24 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-tg_anki}
-    ports:
-      - "5433:5432"
+    expose:
+      - "5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
+    restart: unless-stopped
 
   clamav:
     image: clamav/clamav:latest
     platform: linux/amd64
-    ports:
-      - "3310:3310"
+    expose:
+      - "3310"
+    restart: unless-stopped
 
 
   api:
@@ -31,13 +34,34 @@ services:
       - postgres
       - redis
       - clamav
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
       - ./api:/app/api
+    networks:
+      - default
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_PUBLIC_NETWORK:-traefik-public}"
+      - "traefik.http.services.${STACK_NAME:-tg-anki}-api.loadbalancer.server.port=8000"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api.rule=Host(`${TRAEFIK_API_HOST:-api.localhost}`)"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api.tls=true"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api.service=${STACK_NAME:-tg-anki}-api"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.rule=Host(`${TRAEFIK_WEB_HOST:-app.localhost}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.tls=true"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.service=${STACK_NAME:-tg-anki}-api"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.priority=100"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-api-path.middlewares=${STACK_NAME:-tg-anki}-api-strip@docker"
+      - "traefik.http.middlewares.${STACK_NAME:-tg-anki}-api-strip.stripprefix.prefixes=/api"
+    restart: unless-stopped
 
   worker:
     build:
@@ -54,6 +78,7 @@ services:
       - ./data:/app/data
       - ./api:/app/api
       - ./worker:/app/worker
+    restart: unless-stopped
 
   bot:
     build:
@@ -64,6 +89,7 @@ services:
       - api
     volumes:
       - ./bot:/app/bot
+    restart: unless-stopped
 
   web:
     build:
@@ -72,12 +98,32 @@ services:
     env_file: ./.env
     depends_on:
       - api
-    ports:
-      - "5173:5173"
+    expose:
+      - "5173"
     volumes:
       - ./web:/app/web
       - web_node_modules:/app/web/node_modules
     command: ["sh", "-c", "[ -d node_modules ] || npm ci --no-audit --fund=false; npm run dev -- --host 0.0.0.0 --port 5173"]
+    networks:
+      - default
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_PUBLIC_NETWORK:-traefik-public}"
+      - "traefik.http.services.${STACK_NAME:-tg-anki}-web.loadbalancer.server.port=5173"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-web.rule=Host(`${TRAEFIK_WEB_HOST:-app.localhost}`)"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-web.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-web.tls=true"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-web.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-web.priority=1"
+      - "traefik.http.routers.${STACK_NAME:-tg-anki}-web.service=${STACK_NAME:-tg-anki}-web"
+    restart: unless-stopped
+
 volumes:
   pg_data:
   web_node_modules:
+
+networks:
+  traefik-public:
+    external: true
+    name: ${TRAEFIK_PUBLIC_NETWORK:-traefik-public}
