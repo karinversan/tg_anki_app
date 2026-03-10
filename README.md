@@ -250,12 +250,12 @@ celery -A worker.app.celery_app worker -l info
 5) Перезапусти сервисы и открывай Web App через кнопку в боте.
 
 ## Deploy on Dokploy (production)
-- Используй файл `docker-compose.dokploy.yml` из корня репозитория.
+- Используй файл `docker-compose.yml` из корня репозитория (один deploy-flow для Dokploy).
 - Подробная пошаговая инструкция (GitHub app, env, domains, HTTPS для Mini App):
   - `docs/dokploy.md`
 - Рекомендуемая схема доменов:
-  - `app.example.com` -> web service
-  - `api.example.com` -> api service
+  - `app.example.com` -> web service (port `4173`)
+  - `api.example.com` -> api service (port `8000`)
 
 ## Конфигурация
 Минимально нужны:

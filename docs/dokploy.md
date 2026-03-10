@@ -2,19 +2,23 @@
 
 ## 1. What to deploy
 
-Use `docker-compose.dokploy.yml` from repo root.  
-This file is production-oriented:
+Use `docker-compose.yml` from repo root.  
+It is already production-oriented for Dokploy:
 - no local bind mounts from your laptop;
 - persistent Docker volumes for Postgres and app data;
 - web runs as built Vite app (`vite preview` on port `4173`);
 - API runs migrations on startup.
+
+For local development you do not need another deploy flow:
+- `docker-compose.override.yml` is applied automatically by Docker Compose on your machine;
+- it switches web/api to dev ports and mounts source code.
 
 ## 2. Create app in Dokploy
 
 1. `Create Project` -> `Docker Compose`.
 2. Source: GitHub repository `karinversan/tg_anki_app`.
 3. Branch: `main`.
-4. Compose path: `docker-compose.dokploy.yml`.
+4. Compose path: `docker-compose.yml`.
 5. Save.
 
 ## 3. Required environment variables
@@ -53,7 +57,7 @@ If Ollama is not on the same host, use remote provider (`LLM_PROVIDER=gemini`) o
 
 ## 4. Domains and HTTPS in Dokploy
 
-Recommended: separate subdomains.
+Recommended: separate subdomains (single Dokploy deploy).
 
 - `app.example.com` -> service `web`, port `4173`
 - `api.example.com` -> service `api`, port `8000`
@@ -110,3 +114,16 @@ Expected: `200 OK` and `{"status":"ok"}`.
 - Bot button is not Web App:
   - `WEB_BASE_URL` is not `https://...`;
   - BotFather menu button still points to old URL.
+
+## 8. Which ports to use in Dokploy
+
+Use these target ports in Dokploy `Domains`:
+- `web` service -> `4173`
+- `api` service -> `8000`
+
+No public domains needed for:
+- `postgres` (`5432`)
+- `redis` (`6379`)
+- `clamav` (`3310`)
+- `worker`
+- `bot`
