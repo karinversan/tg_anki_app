@@ -1,0 +1,39 @@
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  clamav:
+    ports:
+      - "3310:3310"
+
+  api:
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api:/app/api
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  worker:
+    volumes:
+      - ./api:/app/api
+      - ./worker:/app/worker
+
+  bot:
+    volumes:
+      - ./bot:/app/bot
+
+  web:
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app/web
+      - web_node_modules:/app/web/node_modules
+    command: ["sh", "-c", "[ -d node_modules ] || npm ci --no-audit --fund=false; npm run dev -- --host 0.0.0.0 --port 5173"]
+
+volumes:
+  web_node_modules:
