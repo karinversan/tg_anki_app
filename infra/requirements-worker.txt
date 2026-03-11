@@ -14,7 +14,4 @@ langchain-core==0.3.59
 langchain-google-genai==2.1.4
 langchain-chroma==0.2.3
 chromadb==0.5.23
-sentence-transformers==2.7.0
 fastapi==0.125.0
-transformers==4.46.3
-huggingface-hub==0.36.2
