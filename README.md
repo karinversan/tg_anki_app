@@ -5,8 +5,8 @@
 ## Основные возможности
 - Загрузка PDF/DOCX/TXT и генерация Anki‑колод.
 - Асинхронная обработка через Celery + Redis.
-- Локальная LLM‑генерация через Ollama (поддержка GPU/Metal на macOS).
-- Локальные эмбеддинги и RAG‑retrieval для «привязки» к источнику.
+- LLM‑генерация через OpenRouter/Gemini API.
+- Эмбеддинги (Gemini) и RAG‑retrieval для «привязки» к источнику.
 - Дедупликация вопросов и базовая валидация качества.
 - Сохранение метрик генерации: latency, throughput, stage timings, dedupe и др.
 - Экспорт в `.apkg`, готовый к импорту в Anki.
@@ -221,24 +221,12 @@ docker compose logs -f api worker
 docker compose ps
 ```
 
-### Локальная модель (Ollama + Metal на macOS)
-```bash
-ollama serve
-ollama pull qwen2.5:3b-instruct-q4_K_M
-```
-
-Проверь значения в `.env`:
-- `LLM_PROVIDER=ollama`
-- `LOCAL_LLM_MODEL=qwen2.5:3b-instruct-q4_K_M`
-- `OLLAMA_BASE_URL=http://host.docker.internal:11434` (для Docker сервисов `api/worker`)
-- `OLLAMA_NUM_GPU=-1` (автовыбор; на macOS Ollama использует Metal автоматически)
-
-### Облачная модель (OpenRouter)
-Если локальный Ollama недоступен на сервере, можно переключить генерацию на OpenRouter:
+### Модель генерации (OpenRouter / Gemini)
 - `LLM_PROVIDER=openrouter`
 - `OPENROUTER_API_KEY=<your-api-key>`
 - `OPENROUTER_MODEL=qwen/qwen3-8b:free` (или любой совместимый JSON-friendly model)
 - `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`
+- `LLM_PROVIDER=gemini` + `GEMINI_API_KEY=<your-api-key>` для Gemini
 
 Если используешь uv локально:
 ```bash
@@ -279,22 +267,19 @@ celery -A worker.app.celery_app worker -l info
 - `ADMIN_TELEGRAM_IDS` — список Telegram ID админов через запятую (например, `123456789`)
 
 Дополнительно:
-- `LLM_PROVIDER=ollama` — локальная генерация через Ollama
-- `LOCAL_LLM_MODEL=qwen2.5:3b-instruct-q4_K_M` — лёгкая модель по умолчанию
-- `OLLAMA_BASE_URL=http://host.docker.internal:11434` — URL Ollama для контейнеров
 - `LLM_PROVIDER=openrouter` — генерация через OpenRouter API
 - `OPENROUTER_API_KEY` — ключ OpenRouter (если выбран `openrouter`)
 - `OPENROUTER_MODEL` — модель OpenRouter, например `qwen/qwen3-8b:free`
 - `GEMINI_API_KEY` — только если используешь `LLM_PROVIDER=gemini`
 - `RAG_USE_EMBEDDINGS=true` включает embeddings
-- `EMBEDDING_PROVIDER=local` для локальных эмбеддингов
+- `EMBEDDING_PROVIDER=gemini` (рекомендуется для production)
 - `RAG_REUSE_VECTOR_STORE=true` — переиспользовать существующий Chroma-индекс (сильно ускоряет повторные генерации)
 - `JOB_EXTRACT_CONCURRENCY=4` — параллелизм извлечения текста
 - `JOB_CHUNK_CONCURRENCY=4` — параллелизм chunking
 
 ## Метрики и бенчмарк
-В Mini App для админа доступна кнопка `Считать метрики` (только если ваш `telegram_id` есть в `ADMIN_TELEGRAM_IDS`).
-Она запускает backend-расчёт отчёта и даёт скачивание файлов `JSON/MD` прямо из интерфейса.
+В Mini App для админа доступна кнопка `Метрики` на главной странице (только если ваш `telegram_id` есть в `ADMIN_TELEGRAM_IDS`).
+На странице метрик можно посчитать отчёт, скачать `JSON/MD` и отправить отчёт в Telegram.
 
 Для контрольного end-to-end прогона (создать тему -> загрузить файл -> запустить генерацию -> дождаться результата -> собрать метрики):
 

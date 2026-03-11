@@ -6,8 +6,7 @@ import os
 import platform
 import re
 import time
-from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 from langchain_core.embeddings import Embeddings
@@ -16,9 +15,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-_EMBEDDINGS_CACHE: Embeddings | None = None
-_EMBEDDINGS_LAST_ERROR: str | None = None
-_EMBEDDINGS_LAST_ATTEMPT: float = 0.0
 
 
 def gemini_client() -> ChatGoogleGenerativeAI:
@@ -45,42 +41,6 @@ def gemini_embeddings() -> GoogleGenerativeAIEmbeddings:
     return GoogleGenerativeAIEmbeddings(**kwargs)
 
 
-class LocalSentenceTransformerEmbeddings(Embeddings):
-    def __init__(self, model_name: str, cache_folder: str | None = None, local_files_only: bool = False) -> None:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except Exception as exc:  # pragma: no cover - import error surfaced at runtime
-            raise RuntimeError(
-                "sentence-transformers is required for local embeddings. Install it and rebuild images."
-            ) from exc
-        kwargs: dict[str, Any] = {}
-        if cache_folder:
-            kwargs["cache_folder"] = cache_folder
-        if local_files_only:
-            kwargs["local_files_only"] = True
-        try:
-            self._model = SentenceTransformer(model_name, **kwargs)
-        except TypeError:
-            kwargs.pop("local_files_only", None)
-            self._model = SentenceTransformer(model_name, **kwargs)
-
-    def embed_documents(self, texts: Iterable[str]) -> list[list[float]]:
-        vectors = self._model.encode(
-            list(texts),
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )
-        return [vec.tolist() for vec in vectors]
-
-    def embed_query(self, text: str) -> list[float]:
-        vector = self._model.encode(
-            [text],
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )[0]
-        return vector.tolist()
-
-
 class LLMMessage:
     def __init__(
         self,
@@ -92,72 +52,6 @@ class LLMMessage:
         self.content = content
         self.response_metadata = response_metadata or {}
         self.usage_metadata = usage_metadata or {}
-
-
-class LocalOllamaClient:
-    provider = "ollama"
-
-    def __init__(
-        self,
-        *,
-        model: str,
-        base_url: str,
-        temperature: float,
-        timeout_seconds: int,
-        num_ctx: int,
-        num_predict: int,
-        num_gpu: int,
-        keep_alive: str,
-    ) -> None:
-        self.model_name = model
-        self._url = f"{base_url.rstrip('/')}/api/generate"
-        self._timeout = max(5, timeout_seconds)
-        options: dict[str, Any] = {
-            "temperature": temperature,
-            "num_ctx": max(1024, num_ctx),
-            "num_predict": max(128, num_predict),
-        }
-        if num_gpu >= 0:
-            options["num_gpu"] = num_gpu
-        self._payload = {
-            "model": model,
-            "stream": False,
-            "format": "json",
-            "keep_alive": keep_alive,
-            "options": options,
-        }
-
-    def invoke(self, prompt: str) -> LLMMessage:
-        payload = dict(self._payload)
-        payload["prompt"] = prompt
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                response = client.post(self._url, json=payload)
-            response.raise_for_status()
-        except Exception as exc:
-            raise RuntimeError(
-                "Ollama request failed. Ensure Ollama is running and the model is pulled."
-            ) from exc
-
-        data = response.json()
-        if data.get("error"):
-            raise RuntimeError(str(data["error"]))
-        text = str(data.get("response") or "").strip()
-        usage = {
-            "input_tokens": _safe_number(data.get("prompt_eval_count")),
-            "output_tokens": _safe_number(data.get("eval_count")),
-        }
-        response_meta = {
-            "eval_duration_sec": _duration_to_seconds(data.get("eval_duration")),
-            "prompt_eval_duration_sec": _duration_to_seconds(data.get("prompt_eval_duration")),
-            "total_duration_sec": _duration_to_seconds(data.get("total_duration")),
-            "load_duration_sec": _duration_to_seconds(data.get("load_duration")),
-        }
-        return LLMMessage(
-            text,
-            response_metadata=response_meta,
-            usage_metadata=usage,
-        )
 
 
 class OpenRouterClient:
@@ -261,19 +155,6 @@ class OpenRouterClient:
         )
 
 
-def local_ollama_client() -> LocalOllamaClient:
-    return LocalOllamaClient(
-        model=settings.local_llm_model,
-        base_url=settings.ollama_base_url,
-        temperature=settings.ollama_temperature,
-        timeout_seconds=settings.ollama_request_timeout_seconds,
-        num_ctx=settings.ollama_num_ctx,
-        num_predict=settings.ollama_num_predict,
-        num_gpu=settings.ollama_num_gpu,
-        keep_alive=settings.ollama_keep_alive,
-    )
-
-
 def openrouter_client() -> OpenRouterClient:
     api_key = (settings.openrouter_api_key or "").strip()
     if not api_key:
@@ -288,50 +169,19 @@ def openrouter_client() -> OpenRouterClient:
     )
 
 
-def local_embeddings() -> Embeddings:
-    global _EMBEDDINGS_CACHE, _EMBEDDINGS_LAST_ERROR, _EMBEDDINGS_LAST_ATTEMPT
-    if _EMBEDDINGS_CACHE is not None:
-        return _EMBEDDINGS_CACHE
-    if _EMBEDDINGS_LAST_ERROR:
-        if time.time() - _EMBEDDINGS_LAST_ATTEMPT < settings.embedding_init_backoff_seconds:
-            raise RuntimeError(_EMBEDDINGS_LAST_ERROR)
-    _EMBEDDINGS_LAST_ATTEMPT = time.time()
-    model_name = settings.local_embedding_model
-    cache_folder = str(Path(settings.hf_home).expanduser())
-    if cache_folder:
-        Path(cache_folder).mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("HF_HOME", cache_folder)
-        os.environ.setdefault("TRANSFORMERS_CACHE", cache_folder)
-        os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", cache_folder)
-    try:
-        embeddings = LocalSentenceTransformerEmbeddings(
-            model_name,
-            cache_folder=cache_folder,
-            local_files_only=settings.hf_offline,
-        )
-    except Exception as exc:
-        _EMBEDDINGS_LAST_ERROR = str(exc)
-        raise
-    _EMBEDDINGS_LAST_ERROR = None
-    _EMBEDDINGS_CACHE = embeddings
-    return embeddings
-
-
 def build_llm() -> Any:
-    provider = (settings.llm_provider or "ollama").strip().lower()
-    if provider in {"ollama", "local"}:
-        return local_ollama_client()
+    provider = (settings.llm_provider or "openrouter").strip().lower()
     if provider == "openrouter":
         return openrouter_client()
     if provider == "gemini":
         return gemini_client()
-    raise ValueError(f"Unsupported llm provider: {settings.llm_provider}")
+    raise ValueError(f"Unsupported llm provider: {settings.llm_provider}. Use openrouter or gemini.")
 
 
 def build_embeddings() -> Embeddings:
     provider = (settings.embedding_provider or "gemini").strip().lower()
-    if provider == "local":
-        return local_embeddings()
+    if provider != "gemini":
+        logger.warning("Unsupported embedding provider '%s'; falling back to gemini.", provider)
     return gemini_embeddings()
 
 
@@ -343,14 +193,12 @@ def llm_descriptor(llm: Any) -> dict[str, Any]:
         "platform": system_name,
         "machine": machine,
     }
-    if isinstance(llm, LocalOllamaClient):
-        descriptor["model"] = llm.model_name
-        descriptor["acceleration"] = "metal" if system_name == "darwin" else "cpu_or_cuda"
-    elif isinstance(llm, OpenRouterClient):
+    if isinstance(llm, OpenRouterClient):
         descriptor["model"] = llm.model_name
         descriptor["acceleration"] = "remote"
     else:
         descriptor["model"] = settings.gemini_model
+        descriptor["acceleration"] = "remote"
     return descriptor
 
 

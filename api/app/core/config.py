@@ -29,21 +29,13 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     openrouter_api_key: str | None = None
-    llm_provider: str = "ollama"
+    llm_provider: str = "openrouter"
     gemini_model: str = "gemini-2.5-flash-lite"
     openrouter_model: str = "qwen/qwen3-8b:free"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_request_timeout_seconds: int = 180
     openrouter_temperature: float = 0.3
     openrouter_app_name: str = "Telegram Anki"
-    local_llm_model: str = "qwen2.5:3b-instruct-q4_K_M"
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_request_timeout_seconds: int = 180
-    ollama_num_ctx: int = 4096
-    ollama_num_predict: int = 1024
-    ollama_num_gpu: int = -1
-    ollama_keep_alive: str = "30m"
-    ollama_temperature: float = 0.3
     gemini_embedding_model: str = "models/embedding-001"
     chroma_path: str = "./data/chroma"
     rag_top_k: int = 5
@@ -56,10 +48,6 @@ class Settings(BaseSettings):
     rag_use_embeddings: bool = True
     rag_reuse_vector_store: bool = True
     embedding_provider: str = "gemini"
-    embedding_init_backoff_seconds: int = 300
-    local_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    hf_home: str = "./data/huggingface"
-    hf_offline: bool = False
     filter_generic_answers: bool = True
     generic_answer_patterns: str = ""
     filter_unrelated_content: bool = True

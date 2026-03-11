@@ -645,10 +645,8 @@ async def run_generation_job(job_id: str) -> None:
                     requested_total=requested_total,
                     input_files=len(files),
                 )
-                llm_provider = (settings.llm_provider or "ollama").strip().lower()
-                if llm_provider in {"ollama", "local"}:
-                    llm_model = settings.local_llm_model
-                elif llm_provider == "openrouter":
+                llm_provider = (settings.llm_provider or "openrouter").strip().lower()
+                if llm_provider == "openrouter":
                     llm_model = settings.openrouter_model
                 else:
                     llm_model = settings.gemini_model

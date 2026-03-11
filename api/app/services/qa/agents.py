@@ -44,7 +44,7 @@ def _per_file_quota(ctx: QAContext) -> int:
 
 
 def _qgen_target_raw(quota: int) -> int:
-    provider = (settings.llm_provider or "ollama").strip().lower()
+    provider = (settings.llm_provider or "openrouter").strip().lower()
     # Remote providers are usually rate-limited, so keep less overgeneration.
     multiplier = 1.5 if provider in {"openrouter", "gemini"} else 2.0
     raw_target = max(quota + 4, int(round(quota * multiplier)))

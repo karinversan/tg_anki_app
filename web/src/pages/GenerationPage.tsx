@@ -33,17 +33,17 @@ const MODES: { value: JobMode; label: string; description: string }[] = [
   }
 ];
 
-const LLM_MODEL = "Ollama (local)";
+const LLM_MODEL = "Cloud LLM";
 const UI_MODELS = [
   {
     value: "qwen",
     label: "Qwen",
-    description: "Лёгкая модель, ускорение на GPU/Metal"
+    description: "Базовый профиль модели"
   },
   {
     value: "trinity",
     label: "Trinity",
-    description: "Альтернативная модель в том же локальном профиле"
+    description: "Альтернативный профиль модели"
   }
 ] as const;
 type UiModel = (typeof UI_MODELS)[number]["value"];
@@ -419,7 +419,7 @@ export default function GenerationPage() {
               </option>
             ))}
           </select>
-          <div className="field-subtitle">Локальная через Ollama: {selectedUiModel.description}</div>
+          <div className="field-subtitle">Провайдер задаётся через ENV: {selectedUiModel.description}</div>
           <div className="field-subtitle">Пока выбор интерфейсный и не влияет на генерацию.</div>
         </div>
 
