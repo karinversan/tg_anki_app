@@ -325,15 +325,14 @@ uv run python scripts/generation_metrics_report.py --limit 50 \
   --md-out results/metrics-summary.md
 ```
 
-Скрипт считает ключевые метрики для резюме:
-- `p50/p95` по времени и скорости
-- `quality_score`, `source_coverage_ratio`, `question_uniqueness_ratio`
-- stage timings
-- нормализованные метрики для честного сравнения разных по размеру данных:
-  - `seconds per question`
-  - `seconds per 1k input chars`
-  - `input chars/sec`
-  - E2E по группам количества файлов (`1`, `2-3`, `4-5`, `6+`)
+Скрипт считает core KPI для продукта:
+- `completion_rate`, `failed_rate`, `rate_limited_failure_rate`
+- `TTV (e2e_seconds) p50/p95`
+- нормализованную скорость: `sec_per_question`, `sec_per_1k_chars`
+- качество: `quality_score`, `source_coverage_ratio`, `duplicate_rate`
+- устойчивость: `retries_per_job`, `failed_calls_per_job`
+- модель сложности вычислений:
+  `time_sec ~= b0 + b1*chars_k + b2*files + b3*questions` (+ `R2`)
 
 ## Что важно знать
 - Файлы хранятся **зашифрованно** (AES‑GCM).
