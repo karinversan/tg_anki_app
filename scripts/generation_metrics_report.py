@@ -76,6 +76,17 @@ def fmt(stat: dict[str, float], unit: str) -> str:
     )
 
 
+def bucket_files_count(value: float) -> str:
+    count = int(value)
+    if count <= 1:
+        return "1 file"
+    if count <= 3:
+        return "2-3 files"
+    if count <= 5:
+        return "4-5 files"
+    return "6+ files"
+
+
 async def fetch_jobs(limit: int) -> list[GenerationJob]:
     engine = create_async_engine(settings.database_url, echo=False)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
@@ -103,11 +114,24 @@ def build_report(jobs: list[GenerationJob]) -> tuple[dict[str, Any], str]:
     llm_calls: list[float] = []
     dedupe_removed: list[float] = []
     coverage_ratio: list[float] = []
+    quality_score: list[float] = []
+    source_coverage_ratio: list[float] = []
+    unique_source_count: list[float] = []
+    question_uniqueness_ratio: list[float] = []
     extracting_sec: list[float] = []
     chunking_sec: list[float] = []
     generating_sec: list[float] = []
     deduping_sec: list[float] = []
     exporting_sec: list[float] = []
+    sec_per_question: list[float] = []
+    sec_per_1k_chars: list[float] = []
+    chars_per_sec: list[float] = []
+    files_bucket_e2e: dict[str, list[float]] = {
+        "1 file": [],
+        "2-3 files": [],
+        "4-5 files": [],
+        "6+ files": [],
+    }
 
     for job in jobs:
         data = job.metrics_json or {}
@@ -135,6 +159,30 @@ def build_report(jobs: list[GenerationJob]) -> tuple[dict[str, Any], str]:
         value = to_float(data.get("coverage_ratio"))
         if value is not None:
             coverage_ratio.append(value)
+        value = to_float(data.get("quality_score"))
+        if value is not None:
+            quality_score.append(value)
+        value = to_float(data.get("source_coverage_ratio"))
+        if value is not None:
+            source_coverage_ratio.append(value)
+        value = to_float(data.get("unique_source_count"))
+        if value is not None:
+            unique_source_count.append(value)
+        value = to_float(data.get("question_uniqueness_ratio"))
+        if value is not None:
+            question_uniqueness_ratio.append(value)
+
+        total_elapsed = to_float(data.get("total_elapsed_sec"))
+        final_questions = to_float(data.get("final_questions"))
+        input_text_chars_total = to_float(data.get("input_text_chars_total"))
+        input_files = to_float(data.get("input_files"))
+        if total_elapsed is not None and final_questions and final_questions > 0:
+            sec_per_question.append(total_elapsed / final_questions)
+        if total_elapsed is not None and input_text_chars_total and input_text_chars_total > 0:
+            sec_per_1k_chars.append(total_elapsed / (input_text_chars_total / 1000.0))
+            chars_per_sec.append(input_text_chars_total / total_elapsed)
+        if total_elapsed is not None and input_files is not None and input_files > 0:
+            files_bucket_e2e[bucket_files_count(input_files)].append(total_elapsed)
 
         stage_seconds = data.get("stage_seconds")
         if isinstance(stage_seconds, dict):
@@ -180,6 +228,14 @@ def build_report(jobs: list[GenerationJob]) -> tuple[dict[str, Any], str]:
         "llm_calls": summarize(llm_calls),
         "dedupe_removed": summarize(dedupe_removed),
         "coverage_ratio": summarize(coverage_ratio),
+        "quality_score": summarize(quality_score),
+        "source_coverage_ratio": summarize(source_coverage_ratio),
+        "unique_source_count": summarize(unique_source_count),
+        "question_uniqueness_ratio": summarize(question_uniqueness_ratio),
+        "sec_per_question": summarize(sec_per_question),
+        "sec_per_1k_chars": summarize(sec_per_1k_chars),
+        "chars_per_sec": summarize(chars_per_sec),
+        "e2e_by_files_bucket": {bucket: summarize(values) for bucket, values in files_bucket_e2e.items()},
         "stage_extracting_sec": summarize(extracting_sec),
         "stage_chunking_sec": summarize(chunking_sec),
         "stage_generating_sec": summarize(generating_sec),
@@ -199,6 +255,9 @@ def build_report(jobs: list[GenerationJob]) -> tuple[dict[str, Any], str]:
             f"- End-to-end time: {fmt(summary['e2e_seconds'], 's')}",
             f"- End-to-end speed: {fmt(summary['e2e_qps'], ' q/s')}",
             f"- Generation speed: {fmt(summary['generation_qps'], ' q/s')}",
+            f"- Seconds per question: {fmt(summary['sec_per_question'], 's')}",
+            f"- Seconds per 1k input chars: {fmt(summary['sec_per_1k_chars'], 's')}",
+            f"- Input chars/sec: {fmt(summary['chars_per_sec'], ' chars/s')}",
             "",
             "## LLM",
             f"- Calls per job: {fmt(summary['llm_calls'], '')}",
@@ -207,6 +266,10 @@ def build_report(jobs: list[GenerationJob]) -> tuple[dict[str, Any], str]:
             "## Quality",
             f"- Dedupe removed: {fmt(summary['dedupe_removed'], '')}",
             f"- Coverage ratio: {fmt(summary['coverage_ratio'], '')}",
+            f"- Quality score: {fmt(summary['quality_score'], '')}",
+            f"- Source coverage ratio: {fmt(summary['source_coverage_ratio'], '')}",
+            f"- Unique source count: {fmt(summary['unique_source_count'], '')}",
+            f"- Question uniqueness ratio: {fmt(summary['question_uniqueness_ratio'], '')}",
             "",
             "## Stage Times",
             f"- Extracting: {fmt(summary['stage_extracting_sec'], 's')}",
@@ -214,6 +277,12 @@ def build_report(jobs: list[GenerationJob]) -> tuple[dict[str, Any], str]:
             f"- Generating: {fmt(summary['stage_generating_sec'], 's')}",
             f"- Deduping: {fmt(summary['stage_deduping_sec'], 's')}",
             f"- Exporting: {fmt(summary['stage_exporting_sec'], 's')}",
+            "",
+            "## E2E By File Count",
+            f"- 1 file: {fmt(summary['e2e_by_files_bucket']['1 file'], 's')}",
+            f"- 2-3 files: {fmt(summary['e2e_by_files_bucket']['2-3 files'], 's')}",
+            f"- 4-5 files: {fmt(summary['e2e_by_files_bucket']['4-5 files'], 's')}",
+            f"- 6+ files: {fmt(summary['e2e_by_files_bucket']['6+ files'], 's')}",
         ]
     )
     return summary, markdown
