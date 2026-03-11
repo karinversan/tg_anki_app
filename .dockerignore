@@ -17,9 +17,15 @@ data/
 storage/
 results/
 imgs/
+docs/
+scripts/
+
+reports/
+*.log
 
 web/node_modules/
 web/dist/
+web/.vite/
 
 api/tests/
 description.md
