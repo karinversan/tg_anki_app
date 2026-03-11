@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 import chromadb
+from chromadb.config import Settings as ChromaSettings
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 
@@ -30,6 +31,11 @@ logger = logging.getLogger(__name__)
 
 def _cancelled(ctx: QAContext) -> bool:
     return bool(ctx.should_cancel and ctx.should_cancel())
+
+
+def _chroma_client_settings() -> ChromaSettings:
+    # Disable Chroma telemetry explicitly to avoid noisy posthog/capture runtime errors.
+    return ChromaSettings(anonymized_telemetry=False)
 
 
 def _per_file_quota(ctx: QAContext) -> int:
@@ -179,7 +185,10 @@ class IndexPerFileAgent(Agent):
         persistent_client: chromadb.PersistentClient | None = None
         if reuse_enabled:
             try:
-                persistent_client = chromadb.PersistentClient(path=str(base_dir))
+                persistent_client = chromadb.PersistentClient(
+                    path=str(base_dir),
+                    settings=_chroma_client_settings(),
+                )
             except Exception as exc:
                 logger.warning("Vector-store reuse init failed; fallback to rebuild: %s", exc)
                 ctx.metrics["vector_reuse_error"] = str(exc)
@@ -218,6 +227,7 @@ class IndexPerFileAgent(Agent):
                             collection_name=collection_name,
                             embedding_function=ctx.embeddings,
                             persist_directory=str(base_dir),
+                            client_settings=_chroma_client_settings(),
                         )
                         ctx.stores[f.file_id] = store
                         reused_files += 1
@@ -232,6 +242,7 @@ class IndexPerFileAgent(Agent):
                     ids=chunk_ids,
                     collection_name=collection_name,
                     persist_directory=str(base_dir),
+                    client_settings=_chroma_client_settings(),
                 )
                 ctx.stores[f.file_id] = store
                 indexed_new_files += 1
@@ -342,7 +353,10 @@ class EvidenceAgent(Agent):
             for topic in topics:
                 if _cancelled(ctx):
                     return ctx
-                docs = retriever.get_relevant_documents(topic)[: settings.rag_top_k]
+                docs = retriever.invoke(topic)
+                if not isinstance(docs, list):
+                    docs = []
+                docs = docs[: settings.rag_top_k]
                 if not docs:
                     continue
                 chunks = [
