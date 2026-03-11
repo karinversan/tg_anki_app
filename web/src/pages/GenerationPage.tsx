@@ -34,6 +34,19 @@ const MODES: { value: JobMode; label: string; description: string }[] = [
 ];
 
 const LLM_MODEL = "Ollama (local)";
+const UI_MODELS = [
+  {
+    value: "qwen",
+    label: "Qwen",
+    description: "Лёгкая модель, ускорение на GPU/Metal"
+  },
+  {
+    value: "trinity",
+    label: "Trinity",
+    description: "Альтернативная модель в том же локальном профиле"
+  }
+] as const;
+type UiModel = (typeof UI_MODELS)[number]["value"];
 
 const DIFFICULTIES: JobDifficulty[] = ["easy", "medium", "hard"];
 const STAGE_LABELS: Record<string, string> = {
@@ -69,6 +82,7 @@ export default function GenerationPage() {
   const [count, setCount] = useState(20);
   const [difficulty, setDifficulty] = useState<JobDifficulty>("medium");
   const [mode, setMode] = useState<JobMode>("merged");
+  const [uiModel, setUiModel] = useState<UiModel>("qwen");
   const [avoidRepeats, setAvoidRepeats] = useState(true);
   const [includeAnswers, setIncludeAnswers] = useState(true);
   const [job, setJob] = useState<Job | null>(null);
@@ -250,6 +264,7 @@ export default function GenerationPage() {
   const runtimeStageElapsedSec = metricToNumber(runtimeRaw?.stage_elapsed_sec);
   const runtimeUnitsDone = metricToNumber(runtimeRaw?.units_done);
   const runtimeUnitsTotal = metricToNumber(runtimeRaw?.units_total);
+  const selectedUiModel = UI_MODELS.find((item) => item.value === uiModel) || UI_MODELS[0];
   const statusTitle =
     job?.status === "done"
       ? "Готово ✅"
@@ -394,12 +409,15 @@ export default function GenerationPage() {
 
         <div>
           <div className="field-label">Модель генерации</div>
-          <div className="segmented segmented-vertical">
-            <button className="segment active" type="button">
-              <div className="segment-title">Локальная через Ollama</div>
-              <div className="segment-subtitle">Лёгкая модель, ускорение на GPU/Metal</div>
-            </button>
-          </div>
+          <select value={uiModel} onChange={(e) => setUiModel(e.target.value as UiModel)}>
+            {UI_MODELS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <div className="field-subtitle">Локальная через Ollama: {selectedUiModel.description}</div>
+          <div className="field-subtitle">Пока выбор интерфейсный и не влияет на генерацию.</div>
         </div>
 
         <div className="switch-row">
