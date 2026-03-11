@@ -199,9 +199,32 @@ class OpenRouterClient:
                 if response.status_code == 400 and "response_format" in response.text.lower():
                     payload.pop("response_format", None)
                     response = client.post(self._url, json=payload, headers=headers)
-            response.raise_for_status()
         except Exception as exc:
-            raise RuntimeError("OpenRouter request failed. Check API key, model and network access.") from exc
+            raise RuntimeError("OpenRouter request failed (network). Check connectivity from worker container.") from exc
+
+        if response.status_code >= 400:
+            detail = ""
+            try:
+                data = response.json()
+                if isinstance(data, dict):
+                    error = data.get("error")
+                    if isinstance(error, dict):
+                        detail = str(error.get("message") or error.get("code") or "")
+                    elif error is not None:
+                        detail = str(error)
+            except Exception:
+                detail = response.text.strip()
+            detail = detail or "Unknown error"
+            if response.status_code == 429:
+                retry_after_raw = response.headers.get("Retry-After") or ""
+                try:
+                    retry_after = max(1.0, float(retry_after_raw))
+                except Exception:
+                    retry_after = 10.0
+                raise RuntimeError(
+                    f"OpenRouter rate limit (429): {detail}. retry_delay={retry_after}"
+                )
+            raise RuntimeError(f"OpenRouter HTTP {response.status_code}: {detail}")
 
         data = response.json()
         if isinstance(data, dict) and data.get("error"):
@@ -512,6 +535,8 @@ def invoke(
             if not wait_seconds:
                 if "network connection lost" in lowered or " 502" in lowered or "code 502" in lowered:
                     wait_seconds = min(2 ** (attempt + 1), 20.0)
+                elif "rate limit" in lowered or "429" in lowered:
+                    wait_seconds = min(5.0 * (attempt + 1), 60.0)
             if metrics is not None:
                 llm_metrics = metrics.setdefault("llm", {})
                 llm_metrics["calls_failed"] = int(llm_metrics.get("calls_failed", 0)) + 1
