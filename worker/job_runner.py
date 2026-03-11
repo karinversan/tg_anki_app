@@ -197,6 +197,64 @@ def _estimate_generation_seconds(requested_total: int, file_count: int, chunk_co
     return min(1800.0, base + chunk_component)
 
 
+def _build_quality_metrics(
+    questions: list[dict[str, Any]],
+    *,
+    requested_total: int,
+    input_files: int,
+) -> dict[str, Any]:
+    final_questions = len(questions)
+    if final_questions <= 0:
+        return {
+            "quality_score": 0.0,
+            "source_coverage_ratio": 0.0,
+            "unique_source_count": 0,
+            "question_uniqueness_ratio": 0.0,
+            "question_type_distribution": {},
+        }
+
+    source_backed = 0
+    all_sources: set[str] = set()
+    type_distribution: dict[str, int] = {}
+    seen_questions: set[str] = set()
+    for item in questions:
+        q_type = str(item.get("type", "open")).strip().lower() or "open"
+        type_distribution[q_type] = type_distribution.get(q_type, 0) + 1
+
+        question_text = str(item.get("question", "")).strip().lower()
+        if question_text:
+            seen_questions.add(question_text)
+
+        sources = item.get("sources")
+        source_list: list[str] = []
+        if isinstance(sources, str):
+            source_list = [s.strip() for s in sources.split(",") if s.strip()]
+        elif isinstance(sources, list):
+            source_list = [str(s).strip() for s in sources if str(s).strip()]
+        if source_list:
+            source_backed += 1
+            all_sources.update(source_list)
+
+    source_coverage_ratio = source_backed / max(1, final_questions)
+    completion_ratio = final_questions / max(1, requested_total)
+    source_diversity_ratio = min(1.0, len(all_sources) / max(1, input_files))
+    question_uniqueness_ratio = len(seen_questions) / max(1, final_questions)
+    quality_score = 100.0 * (
+        0.4 * min(1.0, completion_ratio)
+        + 0.35 * source_coverage_ratio
+        + 0.15 * source_diversity_ratio
+        + 0.10 * question_uniqueness_ratio
+    )
+
+    return {
+        "quality_score": round(max(0.0, min(100.0, quality_score)), 1),
+        "source_coverage_ratio": round(source_coverage_ratio, 4),
+        "unique_source_count": len(all_sources),
+        "question_uniqueness_ratio": round(question_uniqueness_ratio, 4),
+        "question_type_distribution": type_distribution,
+    }
+
+
 async def _update_generating_runtime(
     session: AsyncSession,
     job: GenerationJob,
@@ -582,6 +640,11 @@ async def run_generation_job(job_id: str) -> None:
                 total_elapsed_sec = time.perf_counter() - job_started
                 final_questions = len(questions)
                 generation_elapsed = stage_seconds.get("generating", 0.0)
+                quality_metrics = _build_quality_metrics(
+                    questions,
+                    requested_total=requested_total,
+                    input_files=len(files),
+                )
                 llm_provider = (settings.llm_provider or "ollama").strip().lower()
                 if llm_provider in {"ollama", "local"}:
                     llm_model = settings.local_llm_model
@@ -612,6 +675,7 @@ async def run_generation_job(job_id: str) -> None:
                     "throughput_qps_end_to_end": round(final_questions / max(total_elapsed_sec, 1e-9), 4),
                     "throughput_qps_generation": round(final_questions / max(generation_elapsed, 1e-9), 4),
                     "agent_metrics": _round_dict_values(generation_metrics),
+                    **quality_metrics,
                 }
 
                 job.result_paths = {"apkg": str(apkg_path)}

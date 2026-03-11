@@ -253,6 +253,9 @@ export default function GenerationPage() {
   const totalElapsedSec = metricToNumber(metrics?.total_elapsed_sec);
   const throughputQps = metricToNumber(metrics?.throughput_qps_end_to_end);
   const dedupeRemoved = metricToNumber(metrics?.dedupe_removed);
+  const qualityScore = metricToNumber(metrics?.quality_score);
+  const sourceCoverageRatio = metricToNumber(metrics?.source_coverage_ratio);
+  const uniqueSourceCount = metricToNumber(metrics?.unique_source_count);
   const genStageSec = metricToNumber(stageSecondsRaw?.generating);
   const llmCalls = metricToNumber(llmMetricsRaw?.calls_total);
   const llmLatencyAvgSec = metricToNumber(llmMetricsRaw?.latency_avg_sec);
@@ -496,6 +499,24 @@ export default function GenerationPage() {
                 <div className="summary-row">
                   <span className="muted">Скорость</span>
                   <span>{throughputQps.toFixed(2)} вопросов/сек</span>
+                </div>
+              )}
+              {qualityScore !== null && (
+                <div className="summary-row">
+                  <span className="muted">Quality score</span>
+                  <span>{qualityScore.toFixed(1)} / 100</span>
+                </div>
+              )}
+              {sourceCoverageRatio !== null && (
+                <div className="summary-row">
+                  <span className="muted">Source coverage</span>
+                  <span>{(sourceCoverageRatio * 100).toFixed(0)}%</span>
+                </div>
+              )}
+              {uniqueSourceCount !== null && (
+                <div className="summary-row">
+                  <span className="muted">Уникальных источников</span>
+                  <span>{Math.max(0, Math.round(uniqueSourceCount))}</span>
                 </div>
               )}
               {llmCalls !== null && (
