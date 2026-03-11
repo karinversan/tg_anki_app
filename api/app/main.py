@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import auth, files, jobs, topics
@@ -27,6 +27,16 @@ def create_app() -> FastAPI:
         await close_redis()
 
     app = FastAPI(title="Telegram Anki API", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def normalize_api_prefix(request: Request, call_next):
+        path = request.scope.get("path", "")
+        # Support reverse proxies that forward requests as /api/* without stripping the prefix.
+        if path == "/api" or path.startswith("/api/"):
+            normalized = path[4:] or "/"
+            request.scope["path"] = normalized
+            request.scope["raw_path"] = normalized.encode("utf-8")
+        return await call_next(request)
 
     origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
     app.add_middleware(
