@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user, is_admin_user
 from app.core.config import settings
 from app.core.security import create_access_token, verify_telegram_init_data
 from app.db.models import User
@@ -20,6 +21,13 @@ class TelegramAuthRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AuthMeResponse(BaseModel):
+    id: int
+    telegram_id: int
+    is_admin: bool
+
 
 @router.post("/telegram", response_model=TokenResponse)
 async def auth_telegram(payload: TelegramAuthRequest, session: AsyncSession = Depends(get_session)) -> TokenResponse:
@@ -42,3 +50,12 @@ async def auth_telegram(payload: TelegramAuthRequest, session: AsyncSession = De
 
     token = create_access_token(str(user.id))
     return TokenResponse(access_token=token)
+
+
+@router.get("/me", response_model=AuthMeResponse)
+async def auth_me(user: User = Depends(get_current_user)) -> AuthMeResponse:
+    return AuthMeResponse(
+        id=user.id,
+        telegram_id=user.telegram_id,
+        is_admin=is_admin_user(user),
+    )

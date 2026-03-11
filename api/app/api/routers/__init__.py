@@ -1,3 +1,3 @@
-from . import auth, files, jobs, topics
+from . import admin, auth, files, jobs, topics
 
-__all__ = ["auth", "files", "jobs", "topics"]
+__all__ = ["admin", "auth", "files", "jobs", "topics"]

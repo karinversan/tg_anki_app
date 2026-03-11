@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  authMe,
   cancelJob,
+  downloadAdminMetricsReport,
   latestJob,
   retryJob,
+  runAdminMetricsReport,
   sendJobToTelegram,
   startJob,
   Job,
@@ -13,7 +16,7 @@ import {
 } from "../api/client";
 import { getWebApp } from "../telegram";
 import { useAutoDismiss } from "../hooks/useAutoDismiss";
-import type { JobCreatePayload, JobDifficulty, JobMode } from "../api/types";
+import type { AdminMetricsReport, JobCreatePayload, JobDifficulty, JobMode } from "../api/types";
 
 const MODES: { value: JobMode; label: string; description: string }[] = [
   {
@@ -92,8 +95,13 @@ export default function GenerationPage() {
   const [notice, setNotice] = useAutoDismiss<string>(null);
   const [topicTitle, setTopicTitle] = useState<string>("");
   const [fileCount, setFileCount] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminMetricsLimit, setAdminMetricsLimit] = useState(50);
+  const [adminMetricsLoading, setAdminMetricsLoading] = useState(false);
+  const [adminMetricsReport, setAdminMetricsReport] = useState<AdminMetricsReport | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const clampCount = (value: number) => Math.min(200, Math.max(5, value));
+  const clampLimit = (value: number) => Math.min(500, Math.max(5, value));
 
   const stopPolling = () => {
     if (pollTimerRef.current) {
@@ -135,6 +143,18 @@ export default function GenerationPage() {
     };
     loadMeta();
   }, [topicId]);
+
+  useEffect(() => {
+    const loadMe = async () => {
+      try {
+        const me = await authMe();
+        setIsAdmin(Boolean(me.is_admin));
+      } catch {
+        setIsAdmin(false);
+      }
+    };
+    loadMe();
+  }, []);
 
   const onStart = async () => {
     if (!topicId) return;
@@ -224,6 +244,35 @@ export default function GenerationPage() {
     }
   };
 
+  const onRunAdminMetrics = async () => {
+    setError(null);
+    setNotice(null);
+    setAdminMetricsLoading(true);
+    try {
+      const report = await runAdminMetricsReport(adminMetricsLimit);
+      setAdminMetricsReport(report);
+      setNotice("Метрики посчитаны");
+    } catch {
+      setError("Не удалось посчитать метрики");
+    } finally {
+      setAdminMetricsLoading(false);
+    }
+  };
+
+  const onDownloadAdminMetrics = async (format: "json" | "md") => {
+    if (!adminMetricsReport?.report_id) return;
+    setError(null);
+    setNotice(null);
+    setAdminMetricsLoading(true);
+    try {
+      await downloadAdminMetricsReport(adminMetricsReport.report_id, format);
+    } catch {
+      setError("Не удалось скачать отчёт");
+    } finally {
+      setAdminMetricsLoading(false);
+    }
+  };
+
   const canCancel = job?.status === "queued" || job?.status === "running";
   const canRetry = job?.status === "failed" || job?.status === "cancelled";
   const rawCount = job?.params_json?.number_of_questions;
@@ -267,6 +316,20 @@ export default function GenerationPage() {
   const runtimeStageElapsedSec = metricToNumber(runtimeRaw?.stage_elapsed_sec);
   const runtimeUnitsDone = metricToNumber(runtimeRaw?.units_done);
   const runtimeUnitsTotal = metricToNumber(runtimeRaw?.units_total);
+  const adminSummary =
+    adminMetricsReport?.summary && typeof adminMetricsReport.summary === "object"
+      ? (adminMetricsReport.summary as Record<string, unknown>)
+      : null;
+  const adminE2ERaw =
+    adminSummary?.e2e_seconds && typeof adminSummary.e2e_seconds === "object"
+      ? (adminSummary.e2e_seconds as Record<string, unknown>)
+      : null;
+  const adminQualityRaw =
+    adminSummary?.quality_score && typeof adminSummary.quality_score === "object"
+      ? (adminSummary.quality_score as Record<string, unknown>)
+      : null;
+  const adminE2EP50 = metricToNumber(adminE2ERaw?.p50);
+  const adminQualityMean = metricToNumber(adminQualityRaw?.mean);
   const selectedUiModel = UI_MODELS.find((item) => item.value === uiModel) || UI_MODELS[0];
   const statusTitle =
     job?.status === "done"
@@ -422,6 +485,81 @@ export default function GenerationPage() {
           <div className="field-subtitle">Локальная через Ollama: {selectedUiModel.description}</div>
           <div className="field-subtitle">Пока выбор интерфейсный и не влияет на генерацию.</div>
         </div>
+
+        {isAdmin && (
+          <div>
+            <div className="field-label">Админ: отчёт метрик</div>
+            <div className="field-subtitle">Доступно только администратору</div>
+            <div className="field-row">
+              <div className="stepper">
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => setAdminMetricsLimit(clampLimit(adminMetricsLimit - 5))}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min={5}
+                  max={500}
+                  value={adminMetricsLimit}
+                  onChange={(e) => setAdminMetricsLimit(clampLimit(Number(e.target.value) || 5))}
+                />
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => setAdminMetricsLimit(clampLimit(adminMetricsLimit + 5))}
+                >
+                  +
+                </button>
+              </div>
+              <button className="ghost" type="button" onClick={onRunAdminMetrics} disabled={adminMetricsLoading}>
+                {adminMetricsLoading ? "Считаем..." : "Считать метрики"}
+              </button>
+            </div>
+            {adminMetricsReport && (
+              <>
+                <div className="summary">
+                  <div className="summary-row">
+                    <span className="muted">Jobs analyzed</span>
+                    <span>{adminMetricsReport.jobs_analyzed}</span>
+                  </div>
+                  {adminE2EP50 !== null && (
+                    <div className="summary-row">
+                      <span className="muted">E2E p50</span>
+                      <span>{adminE2EP50.toFixed(2)} сек</span>
+                    </div>
+                  )}
+                  {adminQualityMean !== null && (
+                    <div className="summary-row">
+                      <span className="muted">Quality mean</span>
+                      <span>{adminQualityMean.toFixed(1)} / 100</span>
+                    </div>
+                  )}
+                </div>
+                <div className="status-actions">
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => onDownloadAdminMetrics("json")}
+                    disabled={adminMetricsLoading}
+                  >
+                    Скачать JSON
+                  </button>
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => onDownloadAdminMetrics("md")}
+                    disabled={adminMetricsLoading}
+                  >
+                    Скачать MD
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="switch-row">
           <div>

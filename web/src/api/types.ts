@@ -35,3 +35,18 @@ export type JobCreatePayload = {
   avoid_repeats?: boolean;
   include_answers?: boolean;
 };
+
+export type AuthMe = {
+  id: number;
+  telegram_id: number;
+  is_admin: boolean;
+};
+
+export type AdminMetricsReport = {
+  report_id: string;
+  generated_at: string;
+  jobs_analyzed: number;
+  summary: Record<string, unknown>;
+  download_json_url: string;
+  download_md_url: string;
+};

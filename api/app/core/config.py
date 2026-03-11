@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 20
     job_extract_concurrency: int = 4
     job_chunk_concurrency: int = 4
+    admin_telegram_ids: str = ""
+
+    def admin_telegram_id_set(self) -> set[int]:
+        ids: set[int] = set()
+        for raw in (self.admin_telegram_ids or "").split(","):
+            value = raw.strip()
+            if not value:
+                continue
+            try:
+                ids.add(int(value))
+            except ValueError:
+                continue
+        return ids
 
 
 settings = Settings()

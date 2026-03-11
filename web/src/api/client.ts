@@ -1,5 +1,14 @@
 import { request, setToken, getToken, buildApiUrl } from "./http";
-import type { FileRecord, Job, JobCreatePayload, JobDifficulty, JobMode, Topic } from "./types";
+import type {
+  AdminMetricsReport,
+  AuthMe,
+  FileRecord,
+  Job,
+  JobCreatePayload,
+  JobDifficulty,
+  JobMode,
+  Topic
+} from "./types";
 
 export type { FileRecord, Job, JobCreatePayload, JobDifficulty, JobMode, Topic };
 
@@ -12,6 +21,10 @@ export async function authTelegram(initData: string) {
   });
   setToken(data.access_token);
   return data;
+}
+
+export function authMe(): Promise<AuthMe> {
+  return request("/auth/me", { fallbackError: "Failed to fetch profile" });
 }
 
 export function listTopics(): Promise<Topic[]> {
@@ -118,3 +131,29 @@ export async function downloadApkg(topicId: string, jobId: string): Promise<void
 
 export const downloadUrl = (topicId: string, jobId: string, format: string) =>
   buildApiUrl(`/topics/${topicId}/jobs/${jobId}/download/${format}`);
+
+export function runAdminMetricsReport(limit = 50): Promise<AdminMetricsReport> {
+  return request("/admin/metrics/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+    fallbackError: "Failed to build metrics report"
+  });
+}
+
+export async function downloadAdminMetricsReport(reportId: string, format: "json" | "md"): Promise<void> {
+  const res = await fetch(buildApiUrl(`/admin/metrics/report/${reportId}/download/${format}`), {
+    method: "GET",
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {}
+  });
+  if (!res.ok) throw new Error("Failed to download metrics report");
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `metrics-summary-${reportId}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
