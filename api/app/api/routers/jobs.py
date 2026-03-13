@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_job_for_user, get_topic_for_user
+from app.core.config import settings
 from app.db.models import GenerationJob, Topic, User
 from app.db.session import get_session
 from app.schemas.job import JobCreate, JobOut
